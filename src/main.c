@@ -105,9 +105,13 @@ void init_resource_tables(void)
     for (int i = 0; i < 31; i++)
     {
         gpio_table[i].mode = 0xFF; // Uninitialized
+        gpio_table[i].pull = 0;
+        gpio_table[i].edge = 0;
         gpio_table[i].owner = 0;
         gpio_table[i].in_use = 0;
         gpio_table[i].value = 0;
+        gpio_table[i].adc_value = 0;
+        gpio_table[i].adc_voltage_mv = 0;
         gpio_table[i].last_ts = 0;
     }
     for (int i = 0; i < IOT_UART_NUM_MAX; i++)

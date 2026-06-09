@@ -249,12 +249,27 @@ static void send_pending_sync_snapshot(void)
                 .in_use = gpio_table[i].in_use,
                 .value = gpio_table[i].value};
             send_event(EVENT_PORT_STATUS, &status, sizeof(event_port_status_t));
+
+            // Full GPIO state
+            event_gpio_status_t full = {
+                .gpio = (uint8_t)i,
+                .mode = gpio_table[i].mode,
+                .pull = gpio_table[i].pull,
+                .edge = gpio_table[i].edge,
+                .value = gpio_table[i].value,
+                .in_use = gpio_table[i].in_use,
+                .owner = gpio_table[i].owner,
+                .adc_raw = gpio_table[i].adc_value,
+                .adc_mv = gpio_table[i].adc_voltage_mv,
+            };
+            send_event(EVENT_GPIO_STATUS, &full, sizeof(event_gpio_status_t));
         }
     }
     for (int i = 0; i < IOT_UART_NUM_MAX; i++)
     {
         if (uart_table[i].in_use)
         {
+            // Legacy port_status for backward compat
             event_port_status_t status = {
                 .resource_type = 1,
                 .id = (uint8_t)i,
@@ -263,7 +278,38 @@ static void send_pending_sync_snapshot(void)
                 .in_use = uart_table[i].in_use,
                 .value = (uint8_t)(uart_table[i].baudrate & 0xFF)};
             send_event(EVENT_PORT_STATUS, &status, sizeof(event_port_status_t));
+
+            // Full UART state
+            event_uart_status_t full = {
+                .uart_id = (uint8_t)i,
+                .baudrate = uart_table[i].baudrate,
+                .data_bits = uart_table[i].data_bits,
+                .parity = uart_table[i].parity,
+                .stop_bits = uart_table[i].stop_bits,
+                .tx_gpio = uart_table[i].tx_pin,
+                .rx_gpio = uart_table[i].rx_pin,
+                .in_use = uart_table[i].in_use,
+                .owner = uart_table[i].owner,
+            };
+            send_event(EVENT_UART_STATUS, &full, sizeof(event_uart_status_t));
         }
+    }
+
+    // Send BLE status
+    {
+        uint8_t peer_count = 0;
+        for (int i = 0; i < 4; i++)
+        {
+            if (ble_peer_table[i].in_use)
+                peer_count++;
+        }
+        event_ble_status_t ble_status = {
+            .pairing_enabled = ble_pairing_enabled,
+            .scan_enabled = ble_rssi_scan_enabled,
+            .peer_count = peer_count,
+            .pairing_timeout_s = ble_pairing_timeout_s,
+        };
+        send_event(EVENT_BLE_STATUS, &ble_status, sizeof(event_ble_status_t));
     }
 }
 
@@ -365,6 +411,8 @@ void handle_command(msg_frame_t *frame)
         }
         xSemaphoreTake(resource_mutex, portMAX_DELAY);
         gpio_table[cmd->gpio].mode = cmd->mode;
+        gpio_table[cmd->gpio].pull = cmd->pull;
+        gpio_table[cmd->gpio].edge = cmd->edge;
         gpio_table[cmd->gpio].in_use = 1;
         gpio_table[cmd->gpio].owner = 0;
         xSemaphoreGive(resource_mutex);
@@ -443,6 +491,8 @@ void handle_command(msg_frame_t *frame)
             break;
         }
         uint16_t value = adc_read_sample(cmd->gpio, cmd->samples);
+        gpio_table[cmd->gpio].adc_value = value;
+        gpio_table[cmd->gpio].adc_voltage_mv = (uint16_t)(value * 3300 / 4095);
         event_adc_value_t event = {cmd->gpio, value, esp_timer_get_time()};
         send_event(EVENT_ADC_VALUE, &event, sizeof(event_adc_value_t));
         break;
@@ -582,9 +632,39 @@ void handle_command(msg_frame_t *frame)
         }
 
         xSemaphoreTake(resource_mutex, portMAX_DELAY);
+
+        // ── Clear old GPIO ownership if reassigning ──
+        uint8_t old_tx = uart_table[cmd->uart_id].tx_pin;
+        uint8_t old_rx = uart_table[cmd->uart_id].rx_pin;
+        if (old_tx < 31 && gpio_table[old_tx].owner == cmd->uart_id)
+        {
+            gpio_table[old_tx].owner = 0;
+            gpio_table[old_tx].in_use = 0;
+        }
+        if (old_rx < 31 && gpio_table[old_rx].owner == cmd->uart_id)
+        {
+            gpio_table[old_rx].owner = 0;
+            gpio_table[old_rx].in_use = 0;
+        }
+
+        // ── Mark new GPIO ownership ──
+        if (cmd->tx_gpio < 31)
+        {
+            gpio_table[cmd->tx_gpio].owner = cmd->uart_id;
+            gpio_table[cmd->tx_gpio].in_use = 1;
+        }
+        if (cmd->rx_gpio < 31)
+        {
+            gpio_table[cmd->rx_gpio].owner = cmd->uart_id;
+            gpio_table[cmd->rx_gpio].in_use = 1;
+        }
+
         uart_table[cmd->uart_id].tx_pin = cmd->tx_gpio;
         uart_table[cmd->uart_id].rx_pin = cmd->rx_gpio;
         uart_table[cmd->uart_id].baudrate = cmd->baudrate;
+        uart_table[cmd->uart_id].data_bits = cmd->data_bits;
+        uart_table[cmd->uart_id].parity = cmd->parity;
+        uart_table[cmd->uart_id].stop_bits = cmd->stop_bits;
         uart_table[cmd->uart_id].in_use = 1;
         uart_table[cmd->uart_id].owner = 0;
         xSemaphoreGive(resource_mutex);
@@ -909,6 +989,13 @@ void handle_command(msg_frame_t *frame)
     {
         cmd_ble_start_scan_t *cmd = (cmd_ble_start_scan_t *)&frame->payload[1];
         ble_start_rssi_scan(cmd->interval_s);
+        send_cmd_ack(cmd_id, 0, 0, 0);
+        break;
+    }
+
+    case CMD_BLE_STOP_SCAN:
+    {
+        ble_stop_rssi_scan();
         send_cmd_ack(cmd_id, 0, 0, 0);
         break;
     }

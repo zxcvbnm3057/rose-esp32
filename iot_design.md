@@ -57,6 +57,9 @@
 
 - `EVENT_SYNC_RESPONSE`：设备返回状态快照与待确认项清单。
 - `EVENT_THREAD_RESPONSE`：下游设备透传结果事件，携带 `correlation_id`。
+- `EVENT_GPIO_STATUS (0x51)`：GPIO 完整状态快照（mode/pull/edge/value/in_use/adc_raw/adc_mv）。
+- `EVENT_UART_STATUS (0x31)`：UART 完整状态快照（baudrate/data_bits/parity/stop_bits/tx_gpio/rx_gpio）。
+- `EVENT_BLE_STATUS (0x67)`：BLE 完整状态快照（pairing_enabled/scan_enabled/peer_count/timeout）。
 
 ### 3.2 基本结构示例
 
@@ -212,30 +215,73 @@ typedef struct {
 
 ## 6. BLE 业务
 
+### 初始化与广播
+
 - `ble_manager_init`:
   - NimBLE Peripheral 模式
-  - 名称 `ESP32-IoT-Agent`，广播名 `ESP32-IoT`
-  - 开机自动广播
+  - 名称 `ESP32-IoT-Agent`（GAP），广播名 `ESP32-IoT`
+  - 安全配置：`sm_io_cap = BLE_SM_IO_CAP_DISP_ONLY`（仅显示PIN），`sm_bonding = 1`（绑定），`sm_mitm = 1`（防中间人），`sm_sc = 1`（安全连接）
+  - 注册 `sync_cb = ble_on_sync`，同步后自动开始广播
+  - 开机自动广播，`adv_params.conn_mode = BLE_GAP_CONN_MODE_UND`（非定向可连接）
 
-- `CMD_BLE_ENABLE_PAIRING`:
-  - `timeout_s`
-  - 记录 `ble_pairing_enabled` 和 `ble_pairing_timeout_s`
-  - 生成随机 PIN（6位ASCII数字）
-  - 发送 `EVENT_BLE_PAIRING_ENABLED`
+### 配对流程（PIN 认证）
 
-- `CMD_BLE_DISABLE_PAIRING`:
-  - 禁用并发送 `EVENT_BLE_PAIRING_DISABLED`
+1. **启用配对** `CMD_BLE_ENABLE_PAIRING`:
+   - 记录 `ble_pairing_enabled = 1` 及 `ble_pairing_timeout_s`
+   - 生成 6 位随机数字 PIN → `ble_pairing_pin[6]`（ASCII）
+   - 发送 `EVENT_BLE_PAIRING_ENABLED`（含 PIN 码和超时）
 
-- `CMD_BLE_GET_PEERS`:
-  - 返回 `EVENT_BLE_PEERS_LIST`，每个 Peer: 6B mac + 1B rssi
+2. **连接到达** `BLE_GAP_EVENT_CONNECT`:
+   - 分配 peer slot（`ble_peer_table[4]`）
+   - 通过 `ble_gap_conn_find()` 获取 `peer_ota_addr`
+   - 调用 `ble_gap_security_initiate()` 启动安全协商
+   - 若超时或无 slot：主动断开
 
-- `CMD_BLE_START_SCAN`:
-  - 启用 `ble_rssi_scan_enabled`，周期 `interval_s`
-  - `ble_rssi_task` 每秒检查并按间隔发 `EVENT_BLE_RSSI`
+3. **PIN 注入** `BLE_GAP_EVENT_PASSKEY_ACTION`:
+   - 当 `action == BLE_SM_IOACT_DISP`，构造 `ble_sm_io` 并填入 PIN
+   - 调用 `ble_sm_inject_io()` 提交密钥
 
-- GAP 事件：
-  - `CONNECT` -> `EVENT_BLE_PEER_CONNECTED`, 连接成功后 `ble_disable_pairing`
-  - `DISCONNECT` -> `EVENT_BLE_PEER_DISCONNECTED`, 重新广播
+4. **加密完成** `BLE_GAP_EVENT_ENC_CHANGE`:
+   - `status == 0`：配对成功，发送 `EVENT_BLE_PEER_CONNECTED`（MAC + RSSI）
+   - `status != 0`：配对失败，等待断开事件
+
+5. **连接参数更新** `BLE_GAP_EVENT_CONN_UPDATE_REQ`:
+   - 中央设备（手机/电脑）请求更优连接参数（如更短连接间隔）
+   - **必须接受**，否则中央设备会主动断开 → 直接 return 0 表示接受
+
+6. **重复配对** `BLE_GAP_EVENT_REPEAT_PAIRING`:
+   - 设备已有绑定密钥时触发，重新调用 `ble_gap_security_initiate()` 恢复加密
+
+7. **断开** `BLE_GAP_EVENT_DISCONNECT`:
+   - 按 `conn_handle` 匹配并移除 peer
+   - 发送 `EVENT_BLE_PEER_DISCONNECTED`（MAC + reason）
+   - 自动重启广播
+
+### 命令集
+
+| 命令 | 操作码 | 说明 |
+|------|--------|------|
+| `CMD_BLE_ENABLE_PAIRING` | 0x50 | 启用配对，参数 `timeout_s`（4B uint32） |
+| `CMD_BLE_DISABLE_PAIRING` | 0x51 | 立即禁用配对 |
+| `CMD_BLE_GET_PEERS` | 0x52 | 获取已连接设备列表 |
+| `CMD_BLE_START_SCAN` | 0x53 | 启动 RSSI 周期扫描，参数 `interval_s`（4B） |
+| `CMD_BLE_STOP_SCAN` | 0x54 | 停止 RSSI 扫描，无参数 |
+
+### 事件集
+
+| 事件 | 操作码 | 数据结构 |
+|------|--------|----------|
+| `EVENT_BLE_STATUS` | 0x67 | `pairing_enabled:u8`, `scan_enabled:u8`, `peer_count:u8`, `pairing_timeout_s:u32` |
+| `EVENT_BLE_PAIRING_ENABLED` | 0x68 | `pin_code:u8[6]`, `timeout_s:u32`（2B padding） |
+| `EVENT_BLE_PAIRING_DISABLED` | 0x69 | `reason:u8`（0=other, 1=timeout, 2=paired） |
+| `EVENT_BLE_PEERS_LIST` | 0x6A | `peer_count:u8` + N×`(mac:u8[6], rssi:i8)` |
+| `EVENT_BLE_PEER_CONNECTED` | 0x62 | `peer_mac:u8[6]`, `rssi:i8` |
+| `EVENT_BLE_PEER_DISCONNECTED` | 0x63 | `peer_mac:u8[6]`, `reason:u8` |
+| `EVENT_BLE_RSSI` | 0x64 | `peer_mac:u8[6]`, `rssi:i8`, `timestamp_us:u64` |
+
+### RSSI 后台扫描
+
+- `ble_rssi_task`：每秒检查一次，按 `ble_rssi_interval_s` 周期发送 `EVENT_BLE_RSSI` 给每个已连接 peer
 
 ---
 
@@ -426,3 +472,27 @@ typedef struct {
 - `correlation_id` 的 sync 保护仅对 `CMD_THREAD_PASSTHROUGH` 生效（唯一显式传递 correlation_id 的命令）。GPIO/端口/UART/BLE 命令直接发送 `EVENT_CMD_ACK` 不缓存，遵循 §9.5 的端口绑定类指令同步原则。
 - `event_thread_response_t` 在代码中去掉了设计文档中的 `_ex` 后缀，结构体字段与 `event_thread_response_ex_t` 一致。
 - `event_ble_peers_list_t` 线格式为 1B `peer_count` + N×(6B MAC + 1B RSSI)，数据手动拼接在结构体尾部。
+
+---
+
+## 10. 端到端验证 (2026-06-09)
+
+**硬件环境**：ESP32-C6-DevKitM-1，GPIO5↔4 环回，GPIO1↔3 UART 环回，GPIO6 接电位器
+
+| 功能 | 方法 | 结果 |
+|------|------|------|
+| GPIO5→4 环回 | gpio_config(OUTPUT)→gpio_set→gpio_get(GPIO4) | HIGH→1, LOW→0 ✅ |
+| UART0 环回 (GPIO1↔3) | uart_config→uart_send("HELLO")→uart_read | 收到 5 bytes ✅ |
+| ADC GPIO6 | gpio_adc (samples=4) | 1720 raw / 1386mV ✅ |
+| 自定义指令 | create(3步: gpio_config+gpio_set+gpio_get)→execute | 3/3 steps, GPIO4=1 ✅ |
+| BLE 配对 | pairing/enable→disable | PIN 码返回 ✅ |
+| 锁持久化 | toggleLock→刷新页面 | 🔒 图标保留 ✅ |
+| 芯片旋转 | 0°/90°/180°/270° | GPIO 位置正确 ✅ |
+
+**测试**：Mock 120 passed / Real 104 passed / TS 仅 2 pre-existing icon 错误
+
+**修复**：
+- command_dispatcher.c：CMD_UART_CONFIG 增加 gpio_table 旧条目清理
+- CustomCmdEditor.tsx：修复 key=value 参数类型推断（字符串→数字）
+- PortStatusRow：电平/ADC 默认空值，ADC 按 IO 能力显示
+- Bridge 协议测试：27+22=49 个单元测试全覆盖

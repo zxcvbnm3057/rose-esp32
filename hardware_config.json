@@ -1,0 +1,607 @@
+{
+    "chip": {
+        "name": "ESP32-C6-DevKitM-1",
+        "manufacturer": "Espressif",
+        "family": "esp32c6"
+    },
+    "capabilities": {
+        "gpio": true,
+        "adc": true,
+        "signal": true,
+        "uart": true,
+        "uart_count": 2,
+        "ble": true,
+        "thread": true,
+        "max_signal_edges": 256,
+        "max_adc_samples": 16
+    },
+    "pins": [
+        {
+            "gpio": -2,
+            "label": "3V3",
+            "side": "left",
+            "order": 0,
+            "reserved": true,
+            "reserved_reason": "电源引脚",
+            "capabilities": {
+                "input": false,
+                "output": false,
+                "interrupt": false,
+                "adc": false,
+                "signal": false
+            },
+            "adc_channel": null,
+            "default_mode": "fixed",
+            "description": "3.3V 电源输出"
+        },
+        {
+            "gpio": -4,
+            "label": "EN",
+            "side": "left",
+            "order": 1,
+            "reserved": true,
+            "reserved_reason": "复位引脚",
+            "capabilities": {
+                "input": false,
+                "output": false,
+                "interrupt": false,
+                "adc": false,
+                "signal": false
+            },
+            "adc_channel": null,
+            "default_mode": "fixed",
+            "description": "复位/使能 (RST), 低电平复位"
+        },
+        {
+            "gpio": 4,
+            "label": "GPIO4",
+            "side": "left",
+            "order": 2,
+            "reserved": false,
+            "capabilities": {
+                "input": true,
+                "output": true,
+                "interrupt": true,
+                "adc": true,
+                "signal": true
+            },
+            "adc_channel": 4,
+            "default_mode": "input",
+            "description": "ADC1_CH4, LP_GPIO4, Strapping pin (MTMS)"
+        },
+        {
+            "gpio": 5,
+            "label": "GPIO5",
+            "side": "left",
+            "order": 3,
+            "reserved": false,
+            "capabilities": {
+                "input": true,
+                "output": true,
+                "interrupt": true,
+                "adc": true,
+                "signal": true
+            },
+            "adc_channel": 5,
+            "default_mode": "output",
+            "description": "ADC1_CH5, LP_GPIO5, Strapping pin (MTDI), 外接继电器"
+        },
+        {
+            "gpio": 6,
+            "label": "GPIO6",
+            "side": "left",
+            "order": 4,
+            "reserved": false,
+            "capabilities": {
+                "input": true,
+                "output": true,
+                "interrupt": true,
+                "adc": true,
+                "signal": true
+            },
+            "adc_channel": 6,
+            "default_mode": "input",
+            "description": "ADC1_CH6, LP_GPIO6, FSPICLK (MTCK)"
+        },
+        {
+            "gpio": 7,
+            "label": "GPIO7",
+            "side": "left",
+            "order": 5,
+            "reserved": false,
+            "capabilities": {
+                "input": true,
+                "output": true,
+                "interrupt": true,
+                "adc": false,
+                "signal": true
+            },
+            "adc_channel": null,
+            "default_mode": "input",
+            "description": "LP_GPIO7, FSPID (MTDO)"
+        },
+        {
+            "gpio": 0,
+            "label": "GPIO0",
+            "side": "left",
+            "order": 6,
+            "reserved": false,
+            "capabilities": {
+                "input": true,
+                "output": true,
+                "interrupt": true,
+                "adc": true,
+                "signal": true
+            },
+            "adc_channel": 0,
+            "default_mode": "input",
+            "description": "Strapping pin (启动模式选择), ADC1_CH0, LP_GPIO0"
+        },
+        {
+            "gpio": 1,
+            "label": "GPIO1",
+            "side": "left",
+            "order": 7,
+            "reserved": false,
+            "capabilities": {
+                "input": true,
+                "output": true,
+                "interrupt": true,
+                "adc": true,
+                "signal": true
+            },
+            "adc_channel": 1,
+            "default_mode": "input",
+            "description": "ADC1_CH1, LP_GPIO1"
+        },
+        {
+            "gpio": 8,
+            "label": "GPIO8",
+            "side": "left",
+            "order": 8,
+            "reserved": true,
+            "reserved_reason": "Flash 占用",
+            "capabilities": {
+                "input": false,
+                "output": false,
+                "interrupt": false,
+                "adc": false,
+                "signal": false
+            },
+            "adc_channel": null,
+            "default_mode": "input",
+            "description": "Flash 占用 (SPICLK), 不可用"
+        },
+        {
+            "gpio": 10,
+            "label": "GPIO10",
+            "side": "left",
+            "order": 9,
+            "reserved": false,
+            "capabilities": {
+                "input": true,
+                "output": true,
+                "interrupt": true,
+                "adc": false,
+                "signal": true
+            },
+            "adc_channel": null,
+            "default_mode": "input",
+            "description": "FSPICS0, 通用 IO"
+        },
+        {
+            "gpio": 11,
+            "label": "GPIO11",
+            "side": "left",
+            "order": 10,
+            "reserved": false,
+            "capabilities": {
+                "input": true,
+                "output": true,
+                "interrupt": true,
+                "adc": false,
+                "signal": true
+            },
+            "adc_channel": null,
+            "default_mode": "input",
+            "description": "FSPIDQS, 通用 IO"
+        },
+        {
+            "gpio": 2,
+            "label": "GPIO2",
+            "side": "left",
+            "order": 11,
+            "reserved": false,
+            "capabilities": {
+                "input": true,
+                "output": true,
+                "interrupt": true,
+                "adc": true,
+                "signal": true
+            },
+            "adc_channel": 2,
+            "default_mode": "adc",
+            "description": "ADC1_CH2, LP_GPIO2, 板载传感器"
+        },
+        {
+            "gpio": 3,
+            "label": "GPIO3",
+            "side": "left",
+            "order": 12,
+            "reserved": false,
+            "capabilities": {
+                "input": true,
+                "output": true,
+                "interrupt": true,
+                "adc": true,
+                "signal": true
+            },
+            "adc_channel": 3,
+            "default_mode": "input",
+            "description": "ADC1_CH3, LP_GPIO3"
+        },
+        {
+            "gpio": -3,
+            "label": "5V",
+            "side": "left",
+            "order": 13,
+            "reserved": true,
+            "reserved_reason": "电源引脚",
+            "capabilities": {
+                "input": false,
+                "output": false,
+                "interrupt": false,
+                "adc": false,
+                "signal": false
+            },
+            "adc_channel": null,
+            "default_mode": "fixed",
+            "description": "5V 电源输出 (USB供电)"
+        },
+        {
+            "gpio": -11,
+            "label": "GND",
+            "side": "left",
+            "order": 14,
+            "reserved": true,
+            "reserved_reason": "电源引脚",
+            "capabilities": {
+                "input": false,
+                "output": false,
+                "interrupt": false,
+                "adc": false,
+                "signal": false
+            },
+            "adc_channel": null,
+            "default_mode": "fixed",
+            "description": "接地 (Ground)"
+        },
+        {
+            "gpio": -12,
+            "label": "GND",
+            "side": "left",
+            "order": 15,
+            "reserved": true,
+            "reserved_reason": "电源引脚",
+            "capabilities": {
+                "input": false,
+                "output": false,
+                "interrupt": false,
+                "adc": false,
+                "signal": false
+            },
+            "adc_channel": null,
+            "default_mode": "fixed",
+            "description": "接地 (Ground)"
+        },
+        {
+            "gpio": -13,
+            "label": "GND",
+            "side": "right",
+            "order": 0,
+            "reserved": true,
+            "reserved_reason": "电源引脚",
+            "capabilities": {
+                "input": false,
+                "output": false,
+                "interrupt": false,
+                "adc": false,
+                "signal": false
+            },
+            "adc_channel": null,
+            "default_mode": "fixed",
+            "description": "接地 (Ground)"
+        },
+        {
+            "gpio": 16,
+            "label": "GPIO16",
+            "side": "right",
+            "order": 1,
+            "reserved": false,
+            "capabilities": {
+                "input": true,
+                "output": true,
+                "interrupt": true,
+                "adc": false,
+                "signal": true
+            },
+            "adc_channel": null,
+            "default_mode": "input",
+            "description": "U0TXD (UART0 TX), LP_UART TX, 默认串口输出"
+        },
+        {
+            "gpio": 17,
+            "label": "GPIO17",
+            "side": "right",
+            "order": 2,
+            "reserved": false,
+            "capabilities": {
+                "input": true,
+                "output": true,
+                "interrupt": true,
+                "adc": false,
+                "signal": true
+            },
+            "adc_channel": null,
+            "default_mode": "input",
+            "description": "U0RXD (UART0 RX), LP_UART RX, 默认串口输入"
+        },
+        {
+            "gpio": 15,
+            "label": "GPIO15",
+            "side": "right",
+            "order": 3,
+            "reserved": false,
+            "capabilities": {
+                "input": true,
+                "output": true,
+                "interrupt": true,
+                "adc": false,
+                "signal": true
+            },
+            "adc_channel": null,
+            "default_mode": "input",
+            "description": "Strapping pin (MTDO), FSPIDQS"
+        },
+        {
+            "gpio": 23,
+            "label": "GPIO23",
+            "side": "right",
+            "order": 4,
+            "reserved": false,
+            "capabilities": {
+                "input": true,
+                "output": true,
+                "interrupt": true,
+                "adc": false,
+                "signal": true
+            },
+            "adc_channel": null,
+            "default_mode": "input",
+            "description": "SDIO_DATA3, 通用 IO"
+        },
+        {
+            "gpio": 22,
+            "label": "GPIO22",
+            "side": "right",
+            "order": 5,
+            "reserved": false,
+            "capabilities": {
+                "input": true,
+                "output": true,
+                "interrupt": true,
+                "adc": false,
+                "signal": true
+            },
+            "adc_channel": null,
+            "default_mode": "input",
+            "description": "SDIO_DATA2, 通用 IO"
+        },
+        {
+            "gpio": 21,
+            "label": "GPIO21",
+            "side": "right",
+            "order": 6,
+            "reserved": false,
+            "capabilities": {
+                "input": true,
+                "output": true,
+                "interrupt": true,
+                "adc": false,
+                "signal": true
+            },
+            "adc_channel": null,
+            "default_mode": "input",
+            "description": "SDIO_DATA1, 通用 IO"
+        },
+        {
+            "gpio": 20,
+            "label": "GPIO20",
+            "side": "right",
+            "order": 7,
+            "reserved": false,
+            "capabilities": {
+                "input": true,
+                "output": true,
+                "interrupt": true,
+                "adc": false,
+                "signal": true
+            },
+            "adc_channel": null,
+            "default_mode": "input",
+            "description": "SDIO_DATA0, 通用 IO"
+        },
+        {
+            "gpio": 19,
+            "label": "GPIO19",
+            "side": "right",
+            "order": 8,
+            "reserved": false,
+            "capabilities": {
+                "input": true,
+                "output": true,
+                "interrupt": true,
+                "adc": false,
+                "signal": true
+            },
+            "adc_channel": null,
+            "default_mode": "input",
+            "description": "SDIO_CLK, 通用 IO"
+        },
+        {
+            "gpio": 18,
+            "label": "GPIO18",
+            "side": "right",
+            "order": 9,
+            "reserved": false,
+            "capabilities": {
+                "input": true,
+                "output": true,
+                "interrupt": true,
+                "adc": false,
+                "signal": true
+            },
+            "adc_channel": null,
+            "default_mode": "input",
+            "description": "SDIO_CMD, 通用 IO"
+        },
+        {
+            "gpio": 9,
+            "label": "GPIO9",
+            "side": "right",
+            "order": 10,
+            "reserved": true,
+            "reserved_reason": "Flash 占用",
+            "capabilities": {
+                "input": false,
+                "output": false,
+                "interrupt": false,
+                "adc": false,
+                "signal": false
+            },
+            "adc_channel": null,
+            "default_mode": "input",
+            "description": "Flash 占用 (SPIHD), 不可用"
+        },
+        {
+            "gpio": -14,
+            "label": "GND",
+            "side": "right",
+            "order": 11,
+            "reserved": true,
+            "reserved_reason": "电源引脚",
+            "capabilities": {
+                "input": false,
+                "output": false,
+                "interrupt": false,
+                "adc": false,
+                "signal": false
+            },
+            "adc_channel": null,
+            "default_mode": "fixed",
+            "description": "接地 (Ground)"
+        },
+        {
+            "gpio": 13,
+            "label": "GPIO13",
+            "side": "right",
+            "order": 12,
+            "reserved": false,
+            "capabilities": {
+                "input": true,
+                "output": true,
+                "interrupt": true,
+                "adc": false,
+                "signal": true
+            },
+            "adc_channel": null,
+            "default_mode": "input",
+            "description": "USB_D+ (USB-JTAG), FSPIWP, 复用为GPIO则禁用USB-JTAG"
+        },
+        {
+            "gpio": 12,
+            "label": "GPIO12",
+            "side": "right",
+            "order": 13,
+            "reserved": false,
+            "capabilities": {
+                "input": true,
+                "output": true,
+                "interrupt": true,
+                "adc": false,
+                "signal": true
+            },
+            "adc_channel": null,
+            "default_mode": "input",
+            "description": "USB_D- (USB-JTAG), FSPIHD, 复用为GPIO则禁用USB-JTAG"
+        },
+        {
+            "gpio": -15,
+            "label": "GND",
+            "side": "right",
+            "order": 14,
+            "reserved": true,
+            "reserved_reason": "电源引脚",
+            "capabilities": {
+                "input": false,
+                "output": false,
+                "interrupt": false,
+                "adc": false,
+                "signal": false
+            },
+            "adc_channel": null,
+            "default_mode": "fixed",
+            "description": "接地 (Ground)"
+        },
+        {
+            "gpio": -16,
+            "label": "GND",
+            "side": "right",
+            "order": 15,
+            "reserved": true,
+            "reserved_reason": "电源引脚",
+            "capabilities": {
+                "input": false,
+                "output": false,
+                "interrupt": false,
+                "adc": false,
+                "signal": false
+            },
+            "adc_channel": null,
+            "default_mode": "fixed",
+            "description": "接地 (Ground)"
+        }
+    ],
+    "feature_groups": [
+        {
+            "id": "gpio",
+            "label": "GPIO 控制",
+            "icon": "cpu",
+            "enabled": true
+        },
+        {
+            "id": "uart",
+            "label": "UART 通信",
+            "icon": "arrow-left-right",
+            "enabled": true
+        },
+        {
+            "id": "signal",
+            "label": "精确信号",
+            "icon": "activity",
+            "enabled": true
+        },
+        {
+            "id": "ble",
+            "label": "BLE 蓝牙",
+            "icon": "bluetooth",
+            "enabled": true
+        },
+        {
+            "id": "thread",
+            "label": "Thread 网络",
+            "icon": "network",
+            "enabled": true
+        }
+    ]
+}

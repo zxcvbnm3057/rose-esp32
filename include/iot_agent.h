@@ -41,6 +41,7 @@
 #define CMD_SYNC_REQUEST 0x01
 #define CMD_SYN 0x02
 #define CMD_BLE_START_SCAN 0x53
+#define CMD_BLE_STOP_SCAN 0x54
 #define CMD_HEARTBEAT 0xFE
 #define CMD_PING 0xFF
 
@@ -52,6 +53,7 @@
 #define EVENT_ADC_VALUE 0x23
 #define EVENT_GPIO_SIGNAL_CAPTURED 0x24
 #define EVENT_UART_RX 0x30
+#define EVENT_UART_STATUS 0x31 // full UART state for sync
 #define EVENT_THREAD_RESPONSE 0x40
 #define EVENT_PORT_STATUS 0x50
 #define EVENT_BLE_PAIRING_ENABLED 0x60
@@ -60,6 +62,7 @@
 #define EVENT_BLE_PEER_DISCONNECTED 0x63
 #define EVENT_BLE_PEERS_LIST 0x64
 #define EVENT_BLE_RSSI 0x65
+#define EVENT_BLE_STATUS 0x67 // BLE state for sync
 #define EVENT_ERROR 0xFE
 #define EVENT_HEARTBEAT 0xFD
 
@@ -281,6 +284,37 @@ typedef struct
     uint8_t value;
 } event_port_status_t;
 
+// Full GPIO state for sync — includes pull, edge, value, adc
+#define EVENT_GPIO_STATUS 0x51
+#pragma pack(push, 1)
+typedef struct
+{
+    uint8_t gpio;
+    uint8_t mode;  // 0=INPUT, 1=OUTPUT, 2=INTERRUPT, 3=ADC, 4=SIGNAL
+    uint8_t pull;  // 0=NONE, 1=DOWN, 2=UP
+    uint8_t edge;  // 0=NONE, 1=RISING, 2=FALLING, 3=BOTH
+    uint8_t value; // digital level
+    uint8_t in_use;
+    uint16_t owner;
+    uint16_t adc_raw; // only valid when mode==ADC
+    uint16_t adc_mv;  // only valid when mode==ADC
+} event_gpio_status_t;
+
+// Full UART state for sync
+typedef struct
+{
+    uint8_t uart_id;
+    uint32_t baudrate;
+    uint8_t data_bits;
+    uint8_t parity;
+    uint8_t stop_bits;
+    uint8_t tx_gpio;
+    uint8_t rx_gpio;
+    uint8_t in_use;
+    uint16_t owner;
+} event_uart_status_t;
+#pragma pack(pop)
+
 typedef struct
 {
     uint16_t device_id;
@@ -346,15 +380,28 @@ typedef struct
     int64_t timestamp_us;
 } event_ble_rssi_t;
 
+// Full BLE state for sync
+typedef struct __attribute__((packed))
+{
+    uint8_t pairing_enabled;
+    uint8_t scan_enabled;
+    uint8_t peer_count;
+    uint32_t pairing_timeout_s;
+} event_ble_status_t;
+
 #pragma pack(pop)
 
 // Resource tables
 typedef struct
 {
     uint8_t mode;
+    uint8_t pull;
+    uint8_t edge;
     uint16_t owner;
     uint8_t in_use;
     uint8_t value;
+    uint16_t adc_value;
+    uint16_t adc_voltage_mv;
     int64_t last_ts;
 } gpio_status_t;
 
@@ -363,6 +410,9 @@ typedef struct
     uint8_t tx_pin;
     uint8_t rx_pin;
     uint32_t baudrate;
+    uint8_t data_bits;
+    uint8_t parity;
+    uint8_t stop_bits;
     uint16_t owner;
     uint8_t in_use;
     QueueHandle_t event_queue;
@@ -379,15 +429,18 @@ typedef struct
 {
     uint8_t peer_mac[6];
     int8_t rssi;
+    uint16_t conn_handle;
     uint32_t conn_time_s;
-    uint8_t in_use;
+    uint8_t in_use;         // slot occupied (pre-allocated or encrypted)
+    uint8_t encrypted;      // 1 = encryption complete, peer fully connected
+    uint32_t last_active_s; // last activity timestamp for LRU eviction
 } ble_peer_t;
 
 // Global variables externs
 extern gpio_status_t gpio_table[31];
 extern uart_status_t uart_table[IOT_UART_NUM_MAX];
 extern thread_device_t thread_table[16]; // Max 16 devices
-extern ble_peer_t ble_peer_table[4];     // Max 4 BLE peers
+extern ble_peer_t ble_peer_table[8];     // Max 8 BLE peers (LRU eviction)
 extern QueueHandle_t cmd_queue;
 extern QueueHandle_t send_queue;
 extern SemaphoreHandle_t resource_mutex;
@@ -400,6 +453,7 @@ extern uint32_t last_heartbeat_time;
 extern uint32_t reconnect_interval;
 extern uint8_t ble_pairing_enabled;
 extern uint32_t ble_pairing_timeout_s;
+extern uint8_t ble_pairing_pin[6];
 extern uint8_t ble_rssi_scan_enabled;
 extern uint32_t ble_rssi_interval_s;
 
