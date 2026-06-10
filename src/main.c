@@ -1,5 +1,6 @@
 #include "iot_agent.h"
 #include "config.h"
+#include "nvs_store.h"
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -154,6 +155,9 @@ void app_main(void)
     // Initialize NVS before BLE/WiFi
     nvs_flash_init();
     init_sync_state();
+
+    // Restore persisted GPIO / UART / BLE configs from NVS
+    nvs_restore_all();
 
     // Initialize BLE
     ble_manager_init();

@@ -1,4 +1,5 @@
 #include "iot_agent.h"
+#include "nvs_store.h"
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -7,13 +8,9 @@
 #include "driver/uart.h"
 #include "driver/adc.h"
 #include "esp_timer.h"
-#include "nvs_flash.h"
-#include "nvs.h"
 #include <stdlib.h>
 
 static const char *TAG = "dispatcher";
-static const char *NVS_NAMESPACE = "iot_agent";
-static const char *SESSION_VERSION_KEY = "session_version";
 #define MAX_PENDING_SYNC 32
 
 typedef struct
@@ -37,28 +34,6 @@ static int pending_ack_count = 0;
 static pending_thread_result_t pending_thread_results[MAX_PENDING_SYNC] = {0};
 static int pending_thread_count = 0;
 static uint32_t session_version = 0;
-
-static void save_session_version(void)
-{
-    nvs_handle_t handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle) == ESP_OK)
-    {
-        nvs_set_u32(handle, SESSION_VERSION_KEY, session_version);
-        nvs_commit(handle);
-        nvs_close(handle);
-    }
-}
-
-static void load_session_version(void)
-{
-    nvs_handle_t handle;
-    session_version = 0;
-    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle) == ESP_OK)
-    {
-        nvs_get_u32(handle, SESSION_VERSION_KEY, &session_version);
-        nvs_close(handle);
-    }
-}
 
 static void store_pending_ack(uint16_t cmd_id, uint8_t status, uint8_t error_code, uint32_t correlation_id)
 {
@@ -329,9 +304,8 @@ static void send_cmd_ack(uint16_t cmd_id, uint8_t status, uint8_t error_code, ui
 
 void init_sync_state(void)
 {
-    load_session_version();
-    session_version++;
-    save_session_version();
+    session_version = nvs_load_session_version() + 1;
+    nvs_save_session_version(session_version);
 }
 
 static uart_word_length_t map_data_bits(uint8_t data_bits)
@@ -447,6 +421,8 @@ void handle_command(msg_frame_t *frame)
             gpio_isr_handler_add(cmd->gpio, gpio_isr_handler, (void *)(uintptr_t)cmd->gpio);
         }
 
+        nvs_save_gpio_all();
+
         send_event(EVENT_CMD_ACK, &(event_cmd_ack_t){cmd_id, 0, 0, 0}, sizeof(event_cmd_ack_t));
         break;
     }
@@ -462,6 +438,7 @@ void handle_command(msg_frame_t *frame)
         gpio_set_level(cmd->gpio, cmd->value);
         gpio_table[cmd->gpio].value = cmd->value;
         gpio_table[cmd->gpio].last_ts = esp_timer_get_time();
+        nvs_save_gpio_all();
         send_event(EVENT_CMD_ACK, &(event_cmd_ack_t){cmd_id, 0, 0, 0}, sizeof(event_cmd_ack_t));
         break;
     }
@@ -704,6 +681,8 @@ void handle_command(msg_frame_t *frame)
         uart_table[cmd->uart_id].event_queue = uart_event_queue;
         xSemaphoreGive(resource_mutex);
 
+        nvs_save_uart_all();
+
         send_event(EVENT_CMD_ACK, &(event_cmd_ack_t){cmd_id, 0, 0, 0}, sizeof(event_cmd_ack_t));
         break;
     }
@@ -829,6 +808,8 @@ void handle_command(msg_frame_t *frame)
                 }
                 gpio_reset_pin(cmd->id);
 
+                nvs_save_gpio_all();
+
                 send_event(EVENT_CMD_ACK, &(event_cmd_ack_t){cmd_id, 0, 0, 0}, sizeof(event_cmd_ack_t));
                 break;
             }
@@ -852,6 +833,8 @@ void handle_command(msg_frame_t *frame)
                     uart_flush_input(cmd->id);
                 }
                 uart_driver_delete(cmd->id);
+
+                nvs_save_uart_all();
 
                 send_event(EVENT_CMD_ACK, &(event_cmd_ack_t){cmd_id, 0, 0, 0}, sizeof(event_cmd_ack_t));
                 break;

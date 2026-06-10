@@ -7,6 +7,8 @@ export function StatusPanel() {
   const config = useDeviceStore((s) => s.hardwareConfig);
   const mismatchPins = useDeviceStore((s) => s.mismatchPins);
   const updateUart = useDeviceStore((s) => s.updateUart);
+  const lockedPins = useDeviceStore((s) => s.lockedPins);
+  const toggleLock = useDeviceStore((s) => s.toggleLock);
   const addHistory = useDeviceStore((s) => s.addHistory);
   const now = () => new Date().toLocaleTimeString();
 
@@ -15,9 +17,13 @@ export function StatusPanel() {
   const boundUarts = Object.entries(uartStates).filter(([, u]) => u.bound);
 
   const handleUnbindUart = async (uartId: number) => {
+    if (!confirm(`确认解绑 UART${uartId}？`)) return;
     try {
-      await api.uartConfig(uartId, { baudrate: 115200, tx_gpio: 0, rx_gpio: 0 } as never);
-      updateUart(uartId, { bound: false, tx_gpio: 0, rx_gpio: 0 });
+      const uart = uartStates[uartId];
+      await api.portUnbind(1, uartId);
+      updateUart(uartId, { bound: false, tx_gpio: 0, rx_gpio: 0 } as never);
+      if (uart?.tx_gpio != null && lockedPins.has(uart.tx_gpio)) toggleLock(uart.tx_gpio);
+      if (uart?.rx_gpio != null && lockedPins.has(uart.rx_gpio)) toggleLock(uart.rx_gpio);
       addHistory({ time: now(), op: `UART${uartId} 解绑`, result: '✓' });
     } catch (e: unknown) {
       addHistory({ time: now(), op: `UART${uartId} 解绑`, result: `✗ ${(e as Error).message}` });

@@ -6,8 +6,14 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
         ...options,
     });
     if (!res.ok) {
+        // 502/503 = device disconnected — update UI state
+        if (res.status === 502 || res.status === 503) {
+            try {
+                const { useDeviceStore } = await import('../stores/deviceStore');
+                useDeviceStore.getState().setConnected(false);
+            } catch { /* ignore */ }
+        }
         const body = await res.json().catch(() => ({}));
-        // Body uses ApiResponse format: { success, data, error, timestamp }
         const detail = body.error || body.detail || `HTTP ${res.status}`;
         throw new Error(detail);
     }
@@ -120,4 +126,17 @@ export const api = {
         request('/cmds/' + slug, { method: 'DELETE' }),
     executeCmd: (slug: string, params = {}) =>
         request('/cmds/' + slug + '/execute', { method: 'POST', body: JSON.stringify({ params }) }),
+
+    // ── Pin lock & expected state ─────────────────────
+    getLocks: () => request<{ data: { gpio: number; locked: boolean; expected_mode?: number; expected_value?: number }[] }>('/pins/locks'),
+    lockPin: (gpio: number, expected_mode?: number, expected_value?: number) =>
+        request('/pins/' + gpio + '/lock', { method: 'POST', body: JSON.stringify({ expected_mode, expected_value }) }),
+    unlockPin: (gpio: number) =>
+        request('/pins/' + gpio + '/lock', { method: 'DELETE' }),
+    saveExpectedState: (gpio: number, body: { expected_mode?: number; expected_value?: number }) =>
+        request('/pins/' + gpio + '/expected', { method: 'POST', body: JSON.stringify(body) }),
+    saveUartConfig: (uart_id: number, body: { baudrate: number; tx_gpio: number; rx_gpio: number; data_bits?: number; parity?: number; stop_bits?: number }) =>
+        request('/pins/uart/' + uart_id, { method: 'POST', body: JSON.stringify(body) }),
+    deleteUartConfig: (uart_id: number) =>
+        request('/pins/uart/' + uart_id, { method: 'DELETE' }),
 };

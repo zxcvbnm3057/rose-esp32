@@ -39,7 +39,9 @@ class PinLock(Base):
     locked = Column(Integer, default=0, nullable=False)
     expected_mode = Column(Integer, nullable=True)
     expected_value = Column(Integer, nullable=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    pull = Column(Integer, default=0)
+    edge = Column(Integer, default=0)
+    config_ts = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class UartConfigModel(Base):
@@ -53,4 +55,5 @@ class UartConfigModel(Base):
     data_bits = Column(Integer, default=8)
     parity = Column(Integer, default=0)
     stop_bits = Column(Integer, default=1)
+    config_ts = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -76,6 +76,9 @@ export interface UartState {
     baudrate: number;
     tx_gpio: number;
     rx_gpio: number;
+    data_bits?: number;
+    parity?: number;
+    stop_bits?: number;
 }
 
 export interface BleState {
@@ -97,6 +100,7 @@ export interface CustomCommand {
     id: number;
     slug: string;
     name: string;
+    icon?: string;
     description: string;
     enabled: boolean;
     step_count: number;

@@ -2,6 +2,10 @@ import { useEffect, useState, useCallback } from 'react';
 import { Header } from './components/layout/Header';
 import { ChipView } from './components/chip/ChipView';
 import { PinConfigSheet } from './components/panels/PinConfigSheet';
+import { StatusPanel } from './components/panels/StatusPanel';
+import { BlePanel } from './components/panels/BlePanel';
+import { WaveformPanel } from './components/panels/WaveformPanel';
+import { UartConsole } from './components/panels/UartConsole';
 import { CustomCmdEditor } from './components/custom-cmds/CustomCmdEditor';
 import { CustomCmdListPanel } from './components/custom-cmds/CustomCmdListPanel';
 import { useWebSocket } from './hooks/useWebSocket';
@@ -9,18 +13,17 @@ import { api } from './services/api';
 import { useDeviceStore } from './stores/deviceStore';
 import type { HardwareConfig } from './types';
 
-type RightTab = 'history' | 'customCmds';
+type RightTab = 'status' | 'customCmds';
 
 export default function App() {
   useWebSocket();
   const setConfig = useDeviceStore((s) => s.setHardwareConfig);
   const selectedGpio = useDeviceStore((s) => s.selectedGpio);
-  const history = useDeviceStore((s) => s.history);
 
   // Custom command editor modal
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const [cmdRefreshKey, setCmdRefreshKey] = useState(0);
-  const [rightTab, setRightTab] = useState<RightTab>('history');
+  const [rightTab, setRightTab] = useState<RightTab>('status');
 
   // Fallback: fetch hardware config if WebSocket hasn't delivered it yet
   useEffect(() => {
@@ -34,6 +37,19 @@ export default function App() {
       }
     }, 2000);
     return () => clearTimeout(timer);
+  }, []);
+
+  // Load persisted locks + expected states from backend on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await api.getLocks();
+        const locks = res.data || [];
+        const store = useDeviceStore.getState();
+        store.setExpectedGpios(locks);
+        store.loadLocks(locks.filter((l) => l.locked).map((l) => l.gpio));
+      } catch { /* ignore */ }
+    })();
   }, []);
 
   const handleCloseEditor = useCallback(() => {
@@ -56,7 +72,7 @@ export default function App() {
           <ChipView />
         </div>
 
-        {/* Right panel: pin config / history / custom commands */}
+        {/* Right panel: device status / pin config / custom commands */}
         <div className="w-80 border-l border-gray-700 bg-gray-900 flex flex-col overflow-hidden shrink-0">
           {selectedGpio != null ? (
             <PinConfigSheet embedded />
@@ -65,14 +81,14 @@ export default function App() {
               {/* Tab bar */}
               <div className="flex border-b border-gray-700 shrink-0">
                 <button
-                  onClick={() => setRightTab('history')}
+                  onClick={() => setRightTab('status')}
                   className={`flex-1 py-2 text-xs font-medium ${
-                    rightTab === 'history'
+                    rightTab === 'status'
                       ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800'
                       : 'text-gray-500 hover:text-gray-300'
                   }`}
                 >
-                  执行历史
+                  设备状态
                 </button>
                 <button
                   onClick={() => setRightTab('customCmds')}
@@ -86,20 +102,8 @@ export default function App() {
                 </button>
               </div>
 
-              {rightTab === 'history' ? (
-                <div className="flex-1 overflow-y-auto p-3">
-                  {history.length === 0 ? (
-                    <div className="text-xs text-gray-600">暂无记录 — 点击芯片引脚开始操作</div>
-                  ) : (
-                    history.map((h, i) => (
-                      <div key={i} className="text-xs text-gray-400 py-0.5 font-mono border-b border-gray-800 last:border-0">
-                        <span className="text-gray-600">{h.time}</span>{' '}
-                        <span className="text-gray-300">{h.op}</span>{' '}
-                        <span className={h.result.startsWith('✗') ? 'text-red-400' : 'text-green-400'}>{h.result}</span>
-                      </div>
-                    ))
-                  )}
-                </div>
+              {rightTab === 'status' ? (
+                <StatusPanel />
               ) : (
                 <CustomCmdListPanel
                   onEdit={(slug) => setEditingSlug(slug)}
@@ -111,6 +115,13 @@ export default function App() {
           )}
         </div>
       </div>
+
+      {/* Bottom panels: waveform + UART console */}
+      <WaveformPanel />
+      <UartConsole />
+
+      {/* BLE controller (collapsible) */}
+      <BlePanel />
 
       {/* Custom command editor modal */}
       {editingSlug !== null && (

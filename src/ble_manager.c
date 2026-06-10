@@ -1,4 +1,5 @@
 ﻿#include "iot_agent.h"
+#include "nvs_store.h"
 #include "esp_log.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
@@ -425,12 +426,14 @@ void ble_start_rssi_scan(uint32_t interval_s)
     ble_rssi_scan_enabled = 1;
     ble_rssi_interval_s = interval_s;
     ble_rssi_last_scan_time = 0;
+    nvs_save_ble();
     ESP_LOGI(TAG, "RSSI scan started interval=%us", interval_s);
 }
 
 void ble_stop_rssi_scan(void)
 {
     ble_rssi_scan_enabled = 0;
+    nvs_save_ble();
     ESP_LOGI(TAG, "RSSI scan stopped");
 }
 

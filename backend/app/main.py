@@ -49,6 +49,7 @@ _main_loop: asyncio.AbstractEventLoop | None = None
 _gpio_state_cache: dict[int, dict] = {}
 _uart_state_cache: dict[int, dict] = {}
 _ble_state_cache: dict = {}
+_last_heartbeat_time: float = 0  # For heartbeat timeout detection
 
 
 def _update_gpio_cache(gpio: int, update: dict):
@@ -124,6 +125,9 @@ def _on_bridge_event(event: dict):
                 update["edge"] = event["edge"]
             _update_gpio_cache(gpio, update)
 
+        elif etype == "heartbeat":
+            _last_heartbeat_time = time.time()
+
         asyncio.run_coroutine_threadsafe(manager.broadcast(event), loop)
 
 
@@ -135,16 +139,21 @@ async def _monitor_bridge():
     was_connected = False
     while True:
         await asyncio.sleep(2)
-        connected = bridge_service.is_connected()
-        if connected != was_connected:
-            was_connected = connected
-            await manager.broadcast({"type": "connection_change", "connected": connected, "timestamp": time.time()})
-            if connected:
-                # Send hardware config
-                from .config import load_hardware_config, get_pins
-                await manager.broadcast({"type": "hardware_config", "data": load_hardware_config(), "timestamp": time.time()})
-                # Spawn background sync — query all GPIO states and broadcast
-                asyncio.create_task(_sync_device_state(0.5))
+        try:
+            connected = bridge_service.is_connected()
+            # Heartbeat timeout: ESP32 sends hb every 10s; if silent >35s, mark disconnected
+            if connected and _last_heartbeat_time > 0 and (time.time() - _last_heartbeat_time) > 35:
+                logger.warning("Heartbeat timeout — marking disconnected")
+                connected = False
+            if connected != was_connected:
+                was_connected = connected
+                await manager.broadcast({"type": "connection_change", "connected": connected, "timestamp": time.time()})
+                if connected:
+                    from .config import load_hardware_config, get_pins
+                    await manager.broadcast({"type": "hardware_config", "data": load_hardware_config(), "timestamp": time.time()})
+                    asyncio.create_task(_sync_device_state(0.5))
+        except Exception:
+            logger.exception("Error in bridge monitor loop")
 
 
 async def _sync_device_state(delay: float = 0.5):

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useDeviceStore, getUartForGpio, getAvailableUartPins } from '../../stores/deviceStore';
 import { api } from '../../services/api';
 import type { PinConfig } from '../../types';
@@ -6,6 +6,7 @@ import type { PinConfig } from '../../types';
 // ── Types ──────────────────────────────────────────
 
 type PanelMode = 'gpio' | 'uart_setup' | 'uart_active';
+type PickingStage = 'idle' | 'picking_tx' | 'picking_rx';
 
 interface Props {
   embedded?: boolean;
@@ -21,6 +22,9 @@ export function PinConfigSheet({ embedded }: Props) {
   const uartStates = useDeviceStore((s) => s.uartStates);
   const updateUart = useDeviceStore((s) => s.updateUart);
   const addHistory = useDeviceStore((s) => s.addHistory);
+  const setUartPinPicker = useDeviceStore((s) => s.setUartPinPicker);
+  const lockedPins = useDeviceStore((s) => s.lockedPins);
+  const toggleLock = useDeviceStore((s) => s.toggleLock);
 
   // ── Determine panel mode ──
   const uartInfo = useMemo(() => {
@@ -65,13 +69,23 @@ export function PinConfigSheet({ embedded }: Props) {
   const [uartRx, setUartRx] = useState(0);
   const [uartBaud, setUartBaud] = useState(115200);
 
+  // ── GPIO status display ──
+  const [gpioReadResult, setGpioReadResult] = useState<string | null>(null);
+  const [adcReadResult, setAdcReadResult] = useState<string | null>(null);
+
   // ── UART active state (send/read) ──
   const [uartSendData, setUartSendData] = useState('');
   const [uartReadLen, setUartReadLen] = useState(256);
   const [uartReadResult, setUartReadResult] = useState<string | null>(null);
-  // Rebind state
-  const [rebindTx, setRebindTx] = useState<number | null>(null);
-  const [rebindRx, setRebindRx] = useState<number | null>(null);
+
+  // UART pin picker stage
+  const [pickingStage, setPickingStage] = useState<PickingStage>('idle');
+
+  // Cleanup picker on unmount/mode change
+  useEffect(() => { return () => { setUartPinPicker(null); }; }, []);
+  useEffect(() => {
+    if (panelMode !== 'uart_setup') { setUartPinPicker(null); setPickingStage('idle'); }
+  }, [panelMode]);
 
   // Reset uart setup when entering uart_setup mode
   useEffect(() => {
@@ -86,14 +100,35 @@ export function PinConfigSheet({ embedded }: Props) {
     }
   }, [panelMode, selectedGpio]);
 
-  // Reset rebind when entering uart_active
-  useEffect(() => {
-    if (panelMode === 'uart_active' && uartInfo) {
-      const u = uartStates[uartInfo.uart_id];
-      setRebindTx(u?.tx_gpio ?? null);
-      setRebindRx(u?.rx_gpio ?? null);
-    }
-  }, [panelMode, uartInfo]);
+  // Pin picker callbacks — independent TX / RX
+  const startPickTx = useCallback(() => {
+    setPickingStage('picking_tx');
+    setUartPinPicker({
+      uart_id: uartId, role: 'tx',
+      onPick: (gpio) => {
+        setUartTx(gpio);
+        setPickingStage('idle');
+        setUartPinPicker(null);
+      },
+    });
+  }, [uartId]);
+
+  const startPickRx = useCallback(() => {
+    setPickingStage('picking_rx');
+    setUartPinPicker({
+      uart_id: uartId, role: 'rx',
+      onPick: (gpio) => {
+        setUartRx(gpio);
+        setPickingStage('idle');
+        setUartPinPicker(null);
+      },
+    });
+  }, [uartId]);
+
+  const cancelPick = useCallback(() => {
+    setPickingStage('idle');
+    setUartPinPicker(null);
+  }, []);
 
   if (selectedGpio == null || !pin) return null;
 
@@ -101,6 +136,9 @@ export function PinConfigSheet({ embedded }: Props) {
   const caps = pin.capabilities;
   const maxUartCount = config?.capabilities.uart_count ?? 2;
   const availablePins = getAvailableUartPins(config, uartStates);
+  const usedUartIds = new Set(
+    Object.entries(uartStates).filter(([, u]) => u.bound).map(([k]) => Number(k))
+  );
 
   // ── GPIO: mode options ──
   const modes = [
@@ -115,29 +153,27 @@ export function PinConfigSheet({ embedded }: Props) {
   const handleApplyGpio = async () => {
     try {
       await api.gpioConfig(pin.gpio, mode, pull, edge);
-      addHistory({ time: now(), op: `GPIO${pin.gpio} 配置`, result: '✓' });
       if (mode === 1) {
         await api.gpioSet(pin.gpio, outValue);
-        addHistory({ time: now(), op: `GPIO${pin.gpio} SET ${outValue}`, result: '✓' });
       }
+      // Force refresh to update chip immediately
+      try {
+        const res = await api.portStatus(0, pin.gpio);
+        const d = (res as { data: { in_use: number; mode?: number; value?: number } }).data;
+        const store = useDeviceStore.getState();
+        const modes = ['INPUT', 'OUTPUT', 'INTERRUPT', 'ADC', 'SIGNAL'] as const;
+        store.updatePin(pin.gpio, {
+          value: d.value ?? null,
+          mode: d.mode != null ? modes[d.mode] ?? 'UNCONFIGURED' : 'UNCONFIGURED',
+          mode_code: d.mode ?? 0,
+          bound: d.in_use === 1,
+        } as never);
+      } catch { /* best-effort */ }
+      addHistory({ time: now(), op: `GPIO${pin.gpio} 配置`, result: '✓' });
+      selectGpio(null);
     } catch (e: unknown) {
       addHistory({ time: now(), op: `GPIO${pin.gpio} 配置`, result: `✗ ${(e as Error).message}` });
     }
-  };
-
-  const handleReadGpio = async () => {
-    try {
-      const res = await api.gpioGet(pin.gpio);
-      addHistory({ time: now(), op: `GPIO${pin.gpio} GET`, result: `→ ${(res as { data: { value: number } }).data.value}` });
-    } catch { addHistory({ time: now(), op: `GPIO${pin.gpio} GET`, result: '✗' }); }
-  };
-
-  const handleAdcSample = async () => {
-    try {
-      const res = await api.gpioAdc(pin.gpio, samples);
-      const v = (res as { data: { value: number; voltage_mv: number } }).data;
-      addHistory({ time: now(), op: `GPIO${pin.gpio} ADC`, result: `→ ${v.value} (${v.voltage_mv}mV)` });
-    } catch { addHistory({ time: now(), op: `GPIO${pin.gpio} ADC`, result: '✗' }); }
   };
 
   // ── Handlers: UART Setup ──
@@ -148,10 +184,15 @@ export function PinConfigSheet({ embedded }: Props) {
     }
     try {
       await api.uartConfig(uartId, { baudrate: uartBaud, tx_gpio: uartTx, rx_gpio: uartRx });
-      // Optimistically update store
       updateUart(uartId, { uart_id: uartId, bound: true, baudrate: uartBaud, tx_gpio: uartTx, rx_gpio: uartRx });
+      // Auto-lock TX and RX pins
+      if (!lockedPins.has(uartTx)) toggleLock(uartTx);
+      if (!lockedPins.has(uartRx)) toggleLock(uartRx);
       addHistory({ time: now(), op: `UART${uartId} 配置`, result: `✓ TX=GPIO${uartTx} RX=GPIO${uartRx} @${uartBaud}` });
+      setPickingStage('idle');
+      setUartPinPicker(null);
       setPanelMode('uart_active');
+      selectGpio(null); // auto-close on success
     } catch (e: unknown) {
       addHistory({ time: now(), op: `UART${uartId} 配置`, result: `✗ ${(e as Error).message}` });
     }
@@ -183,19 +224,21 @@ export function PinConfigSheet({ embedded }: Props) {
     }
   };
 
-  const handleUartRebind = async () => {
-    if (rebindTx == null || rebindRx == null || rebindTx === rebindRx) {
-      addHistory({ time: now(), op: 'UART 改绑', result: '✗ 无效引脚' });
+  const handleUartRebindTxRx = async (tx: number, rx: number) => {
+    if (tx === rx) {
+      addHistory({ time: now(), op: 'UART 改绑', result: '✗ TX/RX 不能相同' });
       return;
     }
     try {
       await api.uartConfig(activeUartId, {
         baudrate: activeUart?.baudrate ?? 115200,
-        tx_gpio: rebindTx,
-        rx_gpio: rebindRx,
+        tx_gpio: tx, rx_gpio: rx,
       });
-      updateUart(activeUartId, { tx_gpio: rebindTx, rx_gpio: rebindRx });
-      addHistory({ time: now(), op: `UART${activeUartId} 改绑`, result: `✓ TX→GPIO${rebindTx} RX→GPIO${rebindRx}` });
+      updateUart(activeUartId, { tx_gpio: tx, rx_gpio: rx });
+      if (!lockedPins.has(tx)) toggleLock(tx);
+      if (!lockedPins.has(rx)) toggleLock(rx);
+      addHistory({ time: now(), op: `UART${activeUartId} 改绑`, result: `✓ TX→GPIO${tx} RX→GPIO${rx}` });
+      selectGpio(null); // auto-close on success
     } catch (e: unknown) {
       addHistory({ time: now(), op: `UART${activeUartId} 改绑`, result: `✗ ${(e as Error).message}` });
     }
@@ -306,54 +349,51 @@ export function PinConfigSheet({ embedded }: Props) {
             )}
           </div>
 
-          {/* Rebind pins — collapsible */}
+          {/* Rebind pins — click to pick */}
           <details className="text-xs">
             <summary className="text-gray-500 cursor-pointer hover:text-gray-300">改绑 IO 引脚</summary>
             <div className="mt-2 space-y-2 bg-gray-800/50 p-2 rounded">
               <div>
                 <label className="text-gray-500 block mb-0.5">TX 引脚</label>
-                <select
-                  value={rebindTx ?? activeUart.tx_gpio}
-                  onChange={(e) => setRebindTx(Number(e.target.value))}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs"
+                <button
+                  onClick={() => setUartPinPicker({
+                    uart_id: activeUartId, role: 'tx',
+                    onPick: (gpio) => { handleUartRebindTxRx(gpio, activeUart.rx_gpio); setUartPinPicker(null); },
+                  })}
+                  className="w-full text-left bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs hover:bg-gray-600"
                 >
-                  {availablePins.concat(activeUart.tx_gpio).filter((g, i, a) => a.indexOf(g) === i).map((g) => (
-                    <option key={g} value={g}>{pinLabel(g)}</option>
-                  ))}
-                </select>
+                  {pinLabel(activeUart.tx_gpio)} (点击更换)
+                </button>
               </div>
               <div>
                 <label className="text-gray-500 block mb-0.5">RX 引脚</label>
-                <select
-                  value={rebindRx ?? activeUart.rx_gpio}
-                  onChange={(e) => setRebindRx(Number(e.target.value))}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs"
+                <button
+                  onClick={() => setUartPinPicker({
+                    uart_id: activeUartId, role: 'rx',
+                    onPick: (gpio) => { handleUartRebindTxRx(activeUart.tx_gpio, gpio); setUartPinPicker(null); },
+                  })}
+                  className="w-full text-left bg-gray-700 border border-gray-600 rounded px-2 py-1 text-xs hover:bg-gray-600"
                 >
-                  {availablePins.concat(activeUart.rx_gpio).filter((g, i, a) => a.indexOf(g) === i).map((g) => (
-                    <option key={g} value={g}>{pinLabel(g)}</option>
-                  ))}
-                </select>
+                  {pinLabel(activeUart.rx_gpio)} (点击更换)
+                </button>
               </div>
-              <button onClick={handleUartRebind}
-                className="w-full py-1 bg-yellow-700 hover:bg-yellow-600 rounded text-xs">
-                应用改绑
-              </button>
             </div>
           </details>
 
           {/* Unbind UART */}
           <button
             onClick={async () => {
-              if (!confirm('确认解绑 UART 引脚绑定？GPIO 模式保留但 UART 配置将被清除。')) return;
+              if (!confirm('确认解绑 UART 引脚绑定？')) return;
               try {
-                // Unbind by re-configuring with empty/invalid pins triggers unbind on backend
-                // Alternatively just remove from local store
+                await api.portUnbind(1, activeUartId);
                 const { [activeUartId]: _, ...rest } = uartStates;
                 useDeviceStore.setState({ uartStates: rest });
+                if (activeUart.tx_gpio != null && lockedPins.has(activeUart.tx_gpio)) toggleLock(activeUart.tx_gpio);
+                if (activeUart.rx_gpio != null && lockedPins.has(activeUart.rx_gpio)) toggleLock(activeUart.rx_gpio);
                 addHistory({ time: now(), op: `UART${activeUartId} 解绑`, result: '✓' });
                 setPanelMode('gpio');
               } catch (e: unknown) {
-                addHistory({ time: now(), op: `UART${activeUartId} 解绑`, result: `✗` });
+                addHistory({ time: now(), op: `UART${activeUartId} 解绑`, result: `✗ ${(e as Error).message}` });
               }
             }}
             className="w-full py-1.5 bg-red-900/60 hover:bg-red-800/60 rounded text-xs text-red-300 border border-red-800"
@@ -372,42 +412,68 @@ export function PinConfigSheet({ embedded }: Props) {
       )}
 
       {/* ════════════════════════════════════════════
-          UART SETUP: configuring a new UART
+          UART SETUP: click pins on chip to pick TX/RX
           ════════════════════════════════════════════ */}
       {panelMode === 'uart_setup' && !pin.reserved && (
         <div className="space-y-4">
           <div className="bg-blue-900/30 text-blue-300 p-2 rounded text-xs">
-            📡 为此 IO 配置 UART — 请选择 TX/RX 引脚
+            {pickingStage === 'idle'
+              ? '📡 点击下方「选择」按钮，然后在芯片上点击引脚来分别选择 TX/RX'
+              : pickingStage === 'picking_tx'
+                ? '👆 请在芯片上点击 TX (发送) 引脚'
+                : '👆 请在芯片上点击 RX (接收) 引脚'}
           </div>
 
           <div>
             <label className="text-xs text-gray-500 block mb-1">UART 编号</label>
-            <select value={uartId} onChange={(e) => setUartId(Number(e.target.value))}
-              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200">
+            <div className="flex flex-wrap gap-1.5">
               {Array.from({ length: maxUartCount }, (_, i) => (
-                <option key={i} value={i}>UART{i}</option>
+                <button
+                  key={i}
+                  onClick={() => setUartId(i)}
+                  disabled={usedUartIds.has(i)}
+                  className={`px-3 py-1.5 text-xs rounded ${
+                    usedUartIds.has(i)
+                      ? 'bg-gray-800 text-gray-600 cursor-not-allowed line-through'
+                      : uartId === i
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  UART{i}{usedUartIds.has(i) ? ' (占用)' : ''}
+                </button>
               ))}
-            </select>
+            </div>
           </div>
 
           <div>
             <label className="text-xs text-gray-500 block mb-1">TX 引脚 (发送)</label>
-            <select value={uartTx} onChange={(e) => setUartTx(Number(e.target.value))}
-              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200">
-              {availablePins.concat(selectedGpio).filter((g, i, a) => a.indexOf(g) === i).map((g) => (
-                <option key={g} value={g}>{pinLabel(g)}{g === selectedGpio ? ' (当前)' : ''}</option>
-              ))}
-            </select>
+            <button onClick={startPickTx}
+              className={`w-full text-left px-3 py-1.5 rounded text-xs font-mono border transition-colors ${
+                pickingStage === 'picking_tx'
+                  ? 'bg-yellow-900/50 text-yellow-300 border-yellow-600 animate-pulse cursor-pointer'
+                  : 'bg-gray-800 text-gray-200 border-gray-600 hover:border-blue-500 cursor-pointer'
+              }`}>
+              {pinLabel(uartTx)}{uartTx === selectedGpio ? ' (当前)' : ''}
+            </button>
           </div>
 
           <div>
             <label className="text-xs text-gray-500 block mb-1">RX 引脚 (接收)</label>
-            <select value={uartRx} onChange={(e) => setUartRx(Number(e.target.value))}
-              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200">
-              {availablePins.concat(selectedGpio).filter((g, i, a) => a.indexOf(g) === i).map((g) => (
-                <option key={g} value={g}>{pinLabel(g)}</option>
-              ))}
-            </select>
+            <button onClick={startPickRx}
+              className={`w-full text-left px-3 py-1.5 rounded text-xs font-mono border transition-colors ${
+                pickingStage === 'picking_rx'
+                  ? 'bg-yellow-900/50 text-yellow-300 border-yellow-600 animate-pulse cursor-pointer'
+                  : 'bg-gray-800 text-gray-200 border-gray-600 hover:border-orange-500 cursor-pointer'
+              }`}>
+              {pinLabel(uartRx)}
+              {uartTx === uartRx && ' ⚠️'}
+            </button>
+            {pickingStage !== 'idle' && (
+              <button onClick={cancelPick} className="mt-2 px-3 py-1 bg-gray-600 hover:bg-gray-500 rounded text-xs w-full">
+                ✕ 取消选择
+              </button>
+            )}
             {uartTx === uartRx && (
               <div className="text-red-400 text-xs mt-1">⚠ TX 和 RX 不能使用同一引脚</div>
             )}
@@ -416,7 +482,7 @@ export function PinConfigSheet({ embedded }: Props) {
           <div>
             <label className="text-xs text-gray-500 block mb-1">波特率</label>
             <select value={uartBaud} onChange={(e) => setUartBaud(Number(e.target.value))}
-              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-200">
+              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm text-gray-200">
               {[9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600].map((b) => (
                 <option key={b} value={b}>{b}</option>
               ))}
@@ -425,10 +491,11 @@ export function PinConfigSheet({ embedded }: Props) {
 
           <div className="flex gap-2">
             <button onClick={handleApplyUartSetup}
-              className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm font-medium">
+              disabled={uartTx === uartRx}
+              className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded text-sm font-medium">
               应用 UART 配置
             </button>
-            <button onClick={() => setPanelMode('gpio')}
+            <button onClick={() => { setPanelMode('gpio'); setUartPinPicker(null); }}
               className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm">
               取消
             </button>
@@ -441,11 +508,40 @@ export function PinConfigSheet({ embedded }: Props) {
           ════════════════════════════════════════════ */}
       {panelMode === 'gpio' && !pin.reserved && (
         <div className="space-y-4">
-          {/* Current status */}
-          <div className="text-xs text-gray-400">
-            当前: {pinState?.mode ?? pin.default_mode?.toUpperCase()}
-            {pinState?.value != null && ` · ${pinState.value === 1 ? '高电平' : '低电平'}`}
-            {pinState?.adc_voltage_mv != null && ` · ${pinState.adc_voltage_mv}mV`}
+          {/* GPIO Status */}
+          <div className="bg-gray-800/60 rounded p-2.5 space-y-1.5 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-gray-500 text-[11px]">状态</span>
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await api.gpioGet(pin.gpio);
+                    const v = (res as { data: { value: number } }).data.value;
+                    setGpioReadResult(v === 1 ? 'HIGH' : 'LOW');
+                    if (caps.adc) {
+                      const ares = await api.gpioAdc(pin.gpio, samples);
+                      const av = (ares as { data: { value: number; voltage_mv: number } }).data;
+                      setAdcReadResult(`${av.value} / ${av.voltage_mv}mV`);
+                    }
+                  } catch { /* ignore */ }
+                }}
+                className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded hover:bg-gray-700"
+              >🔄 刷新</button>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-gray-500">电平</span>
+              <span className={`font-mono font-bold ${gpioReadResult === 'HIGH' ? 'text-green-400' : gpioReadResult === 'LOW' ? 'text-red-400' : pinState?.value === 1 ? 'text-green-400' : pinState?.value === 0 ? 'text-red-400' : 'text-gray-600'}`}>
+                {gpioReadResult ?? (pinState?.value === 1 ? 'HIGH' : pinState?.value === 0 ? 'LOW' : '--')}
+              </span>
+            </div>
+            {caps.adc && (
+              <div className="flex items-center justify-between">
+                <span className="text-gray-500">ADC</span>
+                <span className="font-mono text-purple-300">
+                  {adcReadResult ?? (pinState?.adc_value != null ? `${pinState.adc_value} / ${pinState.adc_voltage_mv}mV` : '--')}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Mode selection */}
@@ -518,19 +614,25 @@ export function PinConfigSheet({ embedded }: Props) {
             </div>
           )}
 
-          {/* Quick actions */}
-          <div className="flex gap-2">
-            <button onClick={handleReadGpio}
-              className="flex-1 py-2 bg-gray-700 hover:bg-gray-600 rounded text-xs">
-              📥 读取电平
+          {/* Lock toggle — disabled for UART-bound pins */}
+          {uartInfo ? (
+            <button disabled
+              className="w-full py-1.5 rounded text-xs border bg-amber-900/40 text-amber-300/70 border-amber-700/50 cursor-not-allowed"
+            >
+              🔒 UART 占用中，由 UART 管理锁定
             </button>
-            {caps.adc && (
-              <button onClick={handleAdcSample}
-                className="flex-1 py-2 bg-purple-700 hover:bg-purple-600 rounded text-xs">
-                📊 ADC 采样
-              </button>
-            )}
-          </div>
+          ) : (
+            <button
+              onClick={() => toggleLock(pin.gpio)}
+              className={`w-full py-1.5 rounded text-xs border ${
+                lockedPins.has(pin.gpio)
+                  ? 'bg-amber-900/40 text-amber-300 border-amber-700 hover:bg-amber-800/40'
+                  : 'bg-gray-800 text-gray-500 border-gray-700 hover:text-gray-300 hover:border-gray-600'
+              }`}
+            >
+              {lockedPins.has(pin.gpio) ? '🔒 已锁定 — 防自动覆盖 (点击解锁)' : '🔓 锁定引脚配置'}
+            </button>
+          )}
 
           {/* Apply GPIO config */}
           <button onClick={handleApplyGpio}

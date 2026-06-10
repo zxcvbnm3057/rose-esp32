@@ -1,6 +1,5 @@
 // Chip layout utilities — grouping & fixed-pin detection.
-// Visual layout is now CSS Grid (see ChipView.tsx); this file only
-// provides helpers for sorting pins by side.
+// Visual layout: CSS Grid with rotation via pin-slot reassignment.
 
 import type { PinConfig } from '../../types';
 
@@ -14,7 +13,7 @@ export interface PinGroup {
     right: PinConfig[];
 }
 
-/** Group and sort pins by side+order */
+/** Group and sort pins by original side+order */
 export function groupPins(pins: PinConfig[]): PinGroup {
     const g: PinGroup = { top: [], bottom: [], left: [], right: [] };
     for (const p of pins) {
@@ -50,4 +49,3 @@ export function isFixedPin(pin: PinConfig): boolean {
     return pin.gpio < 0 || pin.default_mode === 'fixed' ||
         (pin.reserved && !pin.capabilities?.input && !pin.capabilities?.output && !pin.capabilities?.adc && !pin.capabilities?.signal);
 }
-

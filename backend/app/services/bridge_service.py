@@ -261,7 +261,21 @@ async def ble_disable_pairing() -> bool:
 
 
 async def ble_get_peers() -> Optional[list]:
-    return await _run_sync(get_client().get_ble_peers)
+    raw = await _run_sync(get_client().get_ble_peers)
+    if not raw:
+        return []
+    # Convert raw bytes MAC → hex strings for JSON safety
+    result = []
+    for item in raw:
+        if isinstance(item, (tuple, list)) and len(item) == 2:
+            mac, rssi = item
+            if isinstance(mac, bytes):
+                mac = mac.hex()
+            result.append({"mac": mac, "rssi": rssi})
+        elif hasattr(item, 'mac') and hasattr(item, 'rssi'):
+            mac = item.mac.hex() if isinstance(item.mac, bytes) else str(item.mac)
+            result.append({"mac": mac, "rssi": item.rssi})
+    return result
 
 
 async def ble_start_scan(interval_s: int = 5) -> bool:

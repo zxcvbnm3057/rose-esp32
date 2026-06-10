@@ -51,11 +51,16 @@ def _unbind_all(client, deadline: float):
 
 
 @pytest.fixture(autouse=True)
-def cleanup_resources_before_and_after_test(client):
-    deadline = time.monotonic() + 5.0
-    _unbind_all(client, deadline)
-    client.events.clear_pending()
-    yield
-    if client.is_connected():
+def cleanup_resources_before_and_after_test(request):
+    """Reset port bindings before and after each hardware test."""
+    if "client" in request.fixturenames:
+        client = request.getfixturevalue("client")
         deadline = time.monotonic() + 5.0
         _unbind_all(client, deadline)
+        client.events.clear_pending()
+        yield
+        if client.is_connected():
+            deadline = time.monotonic() + 5.0
+            _unbind_all(client, deadline)
+    else:
+        yield

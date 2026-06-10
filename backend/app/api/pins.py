@@ -92,6 +92,8 @@ async def set_expected_state(
         db.add(row)
     row.expected_mode = body.get("expected_mode")
     row.expected_value = body.get("expected_value")
+    row.pull = body.get("pull", 0)
+    row.edge = body.get("edge", 0)
     await db.commit()
     return ApiResponse(success=True, data={"gpio": gpio}, timestamp=time.time())
 

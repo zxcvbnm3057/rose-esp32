@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useMemo } from 'react';
 import { useDeviceStore } from '../../stores/deviceStore';
 
 type EdgeEvent = { gpio: number; edge_type: number; timestamp_us: number };
@@ -14,134 +14,153 @@ export function WaveformPanel() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(false);
-  const animRef = useRef(0);
+  const edgeEventsRef = useRef(edgeEvents);
+  edgeEventsRef.current = edgeEvents;
+  const pinStatesRef = useRef(pinStates);
+  pinStatesRef.current = pinStates;
+  const liveBaseRef = useRef<{ eventMaxTs: number; perfMs: number } | null>(null);
 
-  // Find all pins in INTERRUPT mode
-  const interruptPins = Object.entries(pinStates)
-    .filter(([, s]) => s.mode === 'INTERRUPT')
-    .map(([gpio]) => Number(gpio));
+  // Find all pins in INTERRUPT mode — stable via useMemo
+  const interruptPins = useMemo(
+    () => Object.entries(pinStates)
+      .filter(([, s]) => s.mode === 'INTERRUPT')
+      .map(([gpio]) => Number(gpio)),
+    [pinStates],
+  );
 
-  // Pins to actually render: monitored pins that are also in INTERRUPT mode
-  const activeMonitoredPins = Object.keys(monitoredPins)
-    .map(Number)
-    .filter((gpio) => interruptPins.includes(gpio));
+  // Pins to actually render — stable via useMemo
+  const activeMonitoredPins = useMemo(
+    () => [...monitoredPins].filter((gpio) => interruptPins.includes(gpio)),
+    [monitoredPins, interruptPins],
+  );
 
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+  const pinnedGpios = activeMonitoredPins.length > 0 ? activeMonitoredPins : interruptPins;
+  const pinnedGpiosRef = useRef(pinnedGpios);
+  pinnedGpiosRef.current = pinnedGpios;
 
-    const w = canvas.width;
-    const h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-
-    // Background
-    ctx.fillStyle = '#0f172a';
-    ctx.fillRect(0, 0, w, h);
-
-    // Grid lines
-    const pinnedGpios = activeMonitoredPins.length > 0 ? activeMonitoredPins : interruptPins;
-    const nPins = pinnedGpios.length;
-    if (nPins === 0) {
-      ctx.fillStyle = '#475569';
-      ctx.font = '12px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('No INT pins — set a pin to INTERRUPT mode to see waveform', w / 2, h / 2);
-      return;
-    }
-
-    const bandH = h / nPins;
-    ctx.strokeStyle = '#1e293b';
-    ctx.lineWidth = 0.5;
-    for (let i = 1; i < nPins; i++) {
-      const y = bandH * i;
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
-    }
-
-    // Build per-pin event lists
-    const perPin: Record<number, EdgeEvent[]> = {};
-    for (const gpio of pinnedGpios) perPin[gpio] = [];
-    for (const ev of edgeEvents) {
-      if (perPin[ev.gpio]) perPin[ev.gpio].push(ev);
-    }
-
-    // Global time domain (union of all events)
-    const allEvents = pinnedGpios.flatMap((g) => perPin[g]);
-    if (allEvents.length < 2) {
-      for (let i = 0; i < nPins; i++) {
-        const yTop = bandH * i;
-        ctx.fillStyle = COLORS_BY_GPIO[pinnedGpios[i]] ?? PIN_COLORS[i % PIN_COLORS.length];
-        ctx.globalAlpha = 0.6;
-        ctx.fillRect(4, yTop + bandH * 0.25, 80, bandH * 0.5);
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = '10px monospace';
-        ctx.textAlign = 'left';
-        ctx.fillText(`GPIO${pinnedGpios[i]}`, 90, yTop + bandH * 0.6);
-      }
-      return;
-    }
-
-    const minTs = Math.min(...allEvents.map((e) => e.timestamp_us));
-    const maxTs = Math.max(...allEvents.map((e) => e.timestamp_us));
-    const timeRange = Math.max(maxTs - minTs, 1);
-
-    for (let i = 0; i < nPins; i++) {
-      const gpio = pinnedGpios[i];
-      const evts = perPin[gpio];
-      const yTop = bandH * i;
-      const yMid = yTop + bandH / 2;
-      const color = COLORS_BY_GPIO[gpio] ?? PIN_COLORS[i % PIN_COLORS.length];
-
-      if (evts.length < 2) continue;
-
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-
-      let level = evts[0].edge_type === 0 ? 1 : 0; // first event: falling means was HIGH
-      const x0 = ((evts[0].timestamp_us - minTs) / timeRange) * w;
-      ctx.moveTo(x0, level ? yTop + 4 : yTop + bandH - 4);
-
-      for (const ev of evts) {
-        const x = ((ev.timestamp_us - minTs) / timeRange) * w;
-        // transition: vertical line
-        ctx.lineTo(x, level ? yTop + 4 : yTop + bandH - 4);
-        // new level
-        level = ev.edge_type === 1 ? 1 : 0;
-        ctx.lineTo(x, level ? yTop + 4 : yTop + bandH - 4);
-      }
-      // Extend to end
-      ctx.lineTo(w, level ? yTop + 4 : yTop + bandH - 4);
-      ctx.stroke();
-
-      // Label
-      ctx.fillStyle = color;
-      ctx.font = 'bold 10px monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText(`GPIO${gpio}`, 4, yMid + 3);
-    }
-
-    // Time label
-    ctx.fillStyle = '#64748b';
-    ctx.font = '9px monospace';
-    ctx.textAlign = 'right';
-    ctx.fillText(`${(timeRange / 1000).toFixed(1)}ms`, w - 4, h - 2);
-  }, [edgeEvents, interruptPins, activeMonitoredPins]);
-
-  // Render on every frame when visible
+  // Single rAF loop — runs forever, reads everything from refs
   useEffect(() => {
-    let raf = 0;
-    const loop = () => {
-      draw();
-      raf = requestAnimationFrame(loop);
+    const draw = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(0, 0, w, h);
+
+      const gpios = pinnedGpiosRef.current;
+      const nPins = gpios.length;
+      if (nPins === 0) {
+        ctx.fillStyle = '#475569';
+        ctx.font = '12px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('Waiting for pin data…', w / 2, h / 2);
+        return;
+      }
+
+      const events = edgeEventsRef.current;
+      const states = pinStatesRef.current;
+
+      const bandH = h / nPins;
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 0.5;
+      for (let i = 1; i < nPins; i++) {
+        const y = bandH * i;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+      }
+
+      const perPin: Record<number, EdgeEvent[]> = {};
+      for (const gpio of gpios) perPin[gpio] = [];
+      for (const ev of events) {
+        if (perPin[ev.gpio]) perPin[ev.gpio].push(ev);
+      }
+
+      const allEvents = gpios.flatMap((g) => perPin[g]);
+      if (allEvents.length < 2) {
+        for (let i = 0; i < nPins; i++) {
+          const gpio = gpios[i];
+          const yTop = bandH * i;
+          const yMid = yTop + bandH / 2;
+          const color = COLORS_BY_GPIO[gpio] ?? PIN_COLORS[i % PIN_COLORS.length];
+          const val = states[gpio]?.value;
+          if (val === 0 || val === 1) {
+            const yLine = val === 1 ? yTop + 4 : yTop + bandH - 4;
+            ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.globalAlpha = 0.5;
+            ctx.beginPath(); ctx.moveTo(0, yLine); ctx.lineTo(w, yLine); ctx.stroke();
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = color; ctx.font = '10px monospace'; ctx.textAlign = 'left';
+            ctx.fillText(`GPIO${gpio} ${val === 1 ? 'HIGH' : 'LOW'}`, 8, yMid + 3);
+          } else {
+            ctx.fillStyle = color; ctx.globalAlpha = 0.15;
+            ctx.fillRect(4, yTop + bandH * 0.15, w - 8, bandH * 0.7);
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = color; ctx.font = '10px monospace'; ctx.textAlign = 'left';
+            ctx.fillText(`GPIO${gpio} (-- unknown)`, 12, yMid + 3);
+          }
+        }
+        return;
+      }
+
+      const minTs = Math.min(...allEvents.map((e: EdgeEvent) => e.timestamp_us));
+      const eventMaxTs = Math.max(...allEvents.map((e: EdgeEvent) => e.timestamp_us));
+      const base2 = liveBaseRef.current;
+      if (!base2 || base2.eventMaxTs !== eventMaxTs) {
+        liveBaseRef.current = { eventMaxTs, perfMs: performance.now() };
+      }
+      const liveMaxTs = eventMaxTs + Math.max(0, (performance.now() - liveBaseRef.current!.perfMs) * 1000);
+      const timeRange = Math.max(liveMaxTs - minTs, 1);
+
+      for (let i = 0; i < nPins; i++) {
+        const gpio = gpios[i];
+        const evts = perPin[gpio];
+        const yTop = bandH * i;
+        const yMid = yTop + bandH / 2;
+        const color = COLORS_BY_GPIO[gpio] ?? PIN_COLORS[i % PIN_COLORS.length];
+        const curVal: number | null | undefined = states[gpio]?.value;
+
+        if (evts.length < 2 && (curVal === 0 || curVal === 1)) {
+          const yLine = curVal === 1 ? yTop + 4 : yTop + bandH - 4;
+          ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.globalAlpha = 0.5;
+          ctx.beginPath(); ctx.moveTo(0, yLine); ctx.lineTo(w, yLine); ctx.stroke();
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = color; ctx.font = '10px monospace'; ctx.textAlign = 'left';
+          ctx.fillText(`GPIO${gpio} ${curVal === 1 ? 'HIGH' : 'LOW'}`, 8, yMid + 3);
+          continue;
+        }
+        if (evts.length < 2) {
+          ctx.fillStyle = color; ctx.globalAlpha = 0.15;
+          ctx.fillRect(4, yTop + bandH * 0.15, w - 8, bandH * 0.7);
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = color; ctx.font = '10px monospace'; ctx.textAlign = 'left';
+          ctx.fillText(`GPIO${gpio} (-- unknown)`, 12, yMid + 3);
+          continue;
+        }
+
+        ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
+        let level = evts[0].edge_type === 1 ? 0 : 1;
+        ctx.moveTo(0, level ? yTop + 4 : yTop + bandH - 4);
+        for (const ev of evts) {
+          const x = ((ev.timestamp_us - minTs) / timeRange) * w;
+          ctx.lineTo(x, level ? yTop + 4 : yTop + bandH - 4);
+          level = ev.edge_type === 1 ? 1 : 0;
+          ctx.lineTo(x, level ? yTop + 4 : yTop + bandH - 4);
+        }
+        ctx.lineTo(w, level ? yTop + 4 : yTop + bandH - 4); ctx.stroke();
+        ctx.fillStyle = color; ctx.font = 'bold 10px monospace'; ctx.textAlign = 'left';
+        ctx.fillText(`GPIO${gpio}`, 4, yMid + 3);
+      }
+      ctx.fillStyle = '#64748b'; ctx.font = '9px monospace'; ctx.textAlign = 'right';
+      ctx.fillText(`${(timeRange / 1000).toFixed(1)}ms`, w - 4, h - 2);
     };
+    let raf = 0;
+    const loop = () => { draw(); raf = requestAnimationFrame(loop); };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [draw]);
-
-  if (interruptPins.length === 0 && edgeEvents.length === 0) return null;
+  }, []);
 
   return (
     <div ref={containerRef} className="border-t border-gray-700 bg-gray-950">
@@ -157,7 +176,7 @@ export function WaveformPanel() {
         </button>
         <div className="flex items-center gap-2">
           {interruptPins.map((gpio) => {
-            const active = monitoredPins[gpio] != null;
+            const active = monitoredPins.has(gpio);
             return (
               <button
                 key={gpio}
@@ -185,7 +204,7 @@ export function WaveformPanel() {
         <canvas
           ref={canvasRef}
           width={800}
-          height={Math.max(60, activeMonitoredPins.length * 50 || interruptPins.length * 50)}
+          height={Math.max(60, pinnedGpios.length * 50)}
           className="w-full block"
         />
       )}
