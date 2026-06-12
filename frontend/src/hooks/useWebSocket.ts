@@ -137,17 +137,28 @@ export function useWebSocket() {
                     case 'ble_peers_list': {
                         const peers = (msg.peers as Array<{ mac: string; rssi: number }>) ?? [];
                         store.setBlePeers(peers);
+                        store.setBleState({ peerCount: peers.length });
                         break;
                     }
                     case 'ble_peer_connected': {
                         const mac = msg.mac as string ?? '';
                         const rssi = msg.rssi as number ?? 0;
-                        if (mac) store.upsertBlePeer(mac, rssi);
+                        if (mac) {
+                            store.upsertBlePeer(mac, rssi);
+                            // Update peerCount from actual peers array length
+                            const currentPeers = useDeviceStore.getState().blePeers;
+                            store.setBleState({ peerCount: currentPeers.length });
+                        }
                         break;
                     }
                     case 'ble_peer_disconnected': {
                         const mac = msg.mac as string ?? '';
-                        if (mac) store.removeBlePeer(mac);
+                        if (mac) {
+                            store.removeBlePeer(mac);
+                            // Update peerCount from actual peers array length
+                            const currentPeers = useDeviceStore.getState().blePeers;
+                            store.setBleState({ peerCount: currentPeers.length });
+                        }
                         break;
                     }
                     case 'ble_rssi': {

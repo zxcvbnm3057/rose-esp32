@@ -3,7 +3,6 @@ import { Header } from './components/layout/Header';
 import { ChipView } from './components/chip/ChipView';
 import { PinConfigSheet } from './components/panels/PinConfigSheet';
 import { StatusPanel } from './components/panels/StatusPanel';
-import { BlePanel } from './components/panels/BlePanel';
 import { WaveformPanel } from './components/panels/WaveformPanel';
 import { UartConsole } from './components/panels/UartConsole';
 import { CustomCmdEditor } from './components/custom-cmds/CustomCmdEditor';
@@ -119,9 +118,6 @@ export default function App() {
       {/* Bottom panels: waveform + UART console */}
       <WaveformPanel />
       <UartConsole />
-
-      {/* BLE controller (collapsible) */}
-      <BlePanel />
 
       {/* Custom command editor modal */}
       {editingSlug !== null && (

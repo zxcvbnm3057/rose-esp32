@@ -128,7 +128,9 @@ def _on_bridge_event(event: dict):
         elif etype == "heartbeat":
             _last_heartbeat_time = time.time()
 
-        asyncio.run_coroutine_threadsafe(manager.broadcast(event), loop)
+        else:
+            # Catch-all: events not handled above get broadcast raw
+            asyncio.run_coroutine_threadsafe(manager.broadcast(event), loop)
 
 
 async def _monitor_bridge():

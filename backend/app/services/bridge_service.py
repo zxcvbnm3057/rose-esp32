@@ -10,11 +10,16 @@ from ..bridge.client import IoTAgentClient
 
 logger = logging.getLogger(__name__)
 
+def _format_mac(raw: bytes) -> str:
+    """Reverse BLE little-endian MAC bytes → XX:XX:XX:XX:XX:XX."""
+    if not raw or len(raw) < 6:
+        return ""
+    return ":".join(f"{b:02x}" for b in reversed(raw[:6]))
+
 # Global singleton
 _client: Optional[IoTAgentClient] = None
 _executor = ThreadPoolExecutor(max_workers=4)
 _event_callback: Optional[Callable[[dict], None]] = None
-
 
 def get_client() -> IoTAgentClient:
     global _client
@@ -86,6 +91,11 @@ async def start_bridge():
     logger.info("Bridge started")
 
 
+def _mac_rev(mac: bytes) -> str:
+    """Reverse BLE little-endian MAC bytes to colon-separated display format."""
+    return _format_mac(mac)
+
+
 def _event_to_dict(event_type: str, event: Any) -> Optional[dict]:
     """Convert a bridge event object to a plain dict."""
     try:
@@ -108,14 +118,14 @@ def _event_to_dict(event_type: str, event: Any) -> Optional[dict]:
         if event_type == "ble_pairing_disabled":
             return {"reason": getattr(event, "reason", 0)}
         if event_type == "ble_peer_connected":
-            return {"mac": getattr(event, "peer_mac", b"").hex(), "rssi": getattr(event, "rssi", 0)}
+            return {"mac": _mac_rev(getattr(event, "peer_mac", b"")), "rssi": getattr(event, "rssi", 0)}
         if event_type == "ble_peer_disconnected":
-            return {"mac": getattr(event, "peer_mac", b"").hex(), "reason": getattr(event, "reason", 0)}
+            return {"mac": _mac_rev(getattr(event, "peer_mac", b"")), "reason": getattr(event, "reason", 0)}
         if event_type == "ble_peers_list":
-            peers = [{"mac": mac.hex() if isinstance(mac, bytes) else str(mac), "rssi": rssi} for mac, rssi in (getattr(event, "peers", []) or [])]
+            peers = [{"mac": _mac_rev(mac) if isinstance(mac, bytes) else str(mac), "rssi": rssi} for mac, rssi in (getattr(event, "peers", []) or [])]
             return {"peers": peers, "peer_count": len(peers)}
         if event_type == "ble_rssi":
-            return {"mac": getattr(event, "peer_mac", b"").hex(), "rssi": getattr(event, "rssi", 0)}
+            return {"mac": _mac_rev(getattr(event, "peer_mac", b"")), "rssi": getattr(event, "rssi", 0)}
         if event_type == "heartbeat":
             return {"connection_state": getattr(event, "connection_state", 0)}
         if event_type == "error":
@@ -264,16 +274,21 @@ async def ble_get_peers() -> Optional[list]:
     raw = await _run_sync(get_client().get_ble_peers)
     if not raw:
         return []
-    # Convert raw bytes MAC → hex strings for JSON safety
     result = []
     for item in raw:
-        if isinstance(item, (tuple, list)) and len(item) == 2:
+        if isinstance(item, dict):
+            mac = item.get("mac", b"")
+            rssi = item.get("rssi", 0)
+            if isinstance(mac, bytes):
+                mac = _format_mac(mac)
+            result.append({"mac": mac, "rssi": rssi})
+        elif isinstance(item, (tuple, list)) and len(item) == 2:
             mac, rssi = item
             if isinstance(mac, bytes):
-                mac = mac.hex()
+                mac = _format_mac(mac)
             result.append({"mac": mac, "rssi": rssi})
         elif hasattr(item, 'mac') and hasattr(item, 'rssi'):
-            mac = item.mac.hex() if isinstance(item.mac, bytes) else str(item.mac)
+            mac = _format_mac(item.mac) if isinstance(item.mac, bytes) else str(item.mac)
             result.append({"mac": mac, "rssi": item.rssi})
     return result
 

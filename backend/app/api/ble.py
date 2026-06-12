@@ -1,9 +1,13 @@
 """BLE endpoints."""
 import time
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 from ..config import get_capabilities
 from ..services import bridge_service
 from ..models.schemas import ApiResponse, BlePairingEnableRequest, BleScanStartRequest
+from ..models.custom_cmd import BleDeviceName
+from ..db.database import async_session
+from sqlalchemy import select
 from .errors import check_connected, check_bridge_ok
 
 router = APIRouter(prefix="/ble", tags=["ble"])
@@ -57,3 +61,48 @@ async def ble_stop_scan():
     ok = await bridge_service.ble_stop_scan()
     check_bridge_ok(ok, "BLE scan stop failed")
     return ApiResponse(success=True, data={"scan_stopped": ok}, timestamp=time.time())
+
+
+# ── BLE Device Name Mappings ──────────────────────────────────────
+
+@router.get("/device-names")
+async def list_ble_device_names():
+    """List all BLE device name mappings."""
+    async with async_session() as session:
+        result = await session.execute(select(BleDeviceName))
+        rows = result.scalars().all()
+        return ApiResponse(success=True, data={
+            "names": [{"mac": r.mac, "name": r.name} for r in rows]
+        }, timestamp=time.time())
+
+
+class BleDeviceNameRequest(BaseModel):
+    name: str
+
+
+@router.put("/device-names/{mac:path}")
+async def set_ble_device_name(mac: str, req: BleDeviceNameRequest):
+    """Set or update a BLE device display name for a MAC address."""
+    from datetime import datetime
+    async with async_session() as session:
+        result = await session.execute(select(BleDeviceName).where(BleDeviceName.mac == mac))
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.name = req.name
+            existing.updated_at = datetime.utcnow()
+        else:
+            session.add(BleDeviceName(mac=mac, name=req.name, updated_at=datetime.utcnow()))
+        await session.commit()
+    return ApiResponse(success=True, data={"mac": mac, "name": req.name}, timestamp=time.time())
+
+
+@router.delete("/device-names/{mac:path}")
+async def delete_ble_device_name(mac: str):
+    """Delete a BLE device name mapping."""
+    async with async_session() as session:
+        result = await session.execute(select(BleDeviceName).where(BleDeviceName.mac == mac))
+        existing = result.scalar_one_or_none()
+        if existing:
+            await session.delete(existing)
+            await session.commit()
+    return ApiResponse(success=True, data={"mac": mac, "deleted": True}, timestamp=time.time())

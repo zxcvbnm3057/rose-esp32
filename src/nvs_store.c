@@ -92,7 +92,14 @@ void nvs_save_session_version(uint32_t version)
 
 static void _nvs_save_gpio_blob(nvs_handle_t handle, int *out_count)
 {
-    event_gpio_status_t cfgs[NVS_GPIO_MAX];
+    // Allocate on heap to avoid stack overflow in main task
+    event_gpio_status_t *cfgs = (event_gpio_status_t *)malloc(NVS_GPIO_MAX * sizeof(event_gpio_status_t));
+    if (!cfgs)
+    {
+        if (out_count)
+            *out_count = 0;
+        return;
+    }
     int count = 0;
     for (int i = 0; i < NVS_GPIO_MAX; i++)
     {
@@ -120,13 +127,21 @@ static void _nvs_save_gpio_blob(nvs_handle_t handle, int *out_count)
         nvs_set_blob(handle, KEY_GPIO_CFG, blob, blob_size);
         free(blob);
     }
+    free(cfgs);
     if (out_count)
         *out_count = count;
 }
 
 static void _nvs_save_uart_blob(nvs_handle_t handle, int *out_count)
 {
-    event_uart_status_t cfgs[NVS_UART_MAX];
+    // Allocate on heap to avoid stack overflow in main task
+    event_uart_status_t *cfgs = (event_uart_status_t *)malloc(NVS_UART_MAX * sizeof(event_uart_status_t));
+    if (!cfgs)
+    {
+        if (out_count)
+            *out_count = 0;
+        return;
+    }
     int count = 0;
     for (int i = 0; i < NVS_UART_MAX; i++)
     {
@@ -154,6 +169,7 @@ static void _nvs_save_uart_blob(nvs_handle_t handle, int *out_count)
         nvs_set_blob(handle, KEY_UART_CFG, blob, blob_size);
         free(blob);
     }
+    free(cfgs);
     if (out_count)
         *out_count = count;
 }

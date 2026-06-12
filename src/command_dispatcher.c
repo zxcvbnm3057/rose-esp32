@@ -272,12 +272,7 @@ static void send_pending_sync_snapshot(void)
 
     // Send BLE status
     {
-        uint8_t peer_count = 0;
-        for (int i = 0; i < 4; i++)
-        {
-            if (ble_peer_table[i].in_use)
-                peer_count++;
-        }
+        uint8_t peer_count = (uint8_t)ble_encrypted_peer_count();
         event_ble_status_t ble_status = {
             .pairing_enabled = ble_pairing_enabled,
             .scan_enabled = ble_rssi_scan_enabled,

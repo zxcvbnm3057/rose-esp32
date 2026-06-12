@@ -5,6 +5,24 @@ type EdgeEvent = { gpio: number; edge_type: number; timestamp_us: number };
 
 const PIN_COLORS = ['#eab308', '#22d3ee', '#a78bfa', '#f472b6', '#34d399', '#fb923c', '#f87171', '#60a5fa'];
 
+const LS_KEY = 'waveform_monitored_pins';
+
+function loadMonitoredPins(): Set<number> {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return new Set();
+    return new Set(JSON.parse(raw) as number[]);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveMonitoredPins(pins: Set<number>) {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify([...pins]));
+  } catch { /* ignore */ }
+}
+
 export function WaveformPanel() {
   const edgeEvents = useDeviceStore((s) => s.edgeEvents);
   const clearEdgeEvents = useDeviceStore((s) => s.clearEdgeEvents);
@@ -19,6 +37,24 @@ export function WaveformPanel() {
   const pinStatesRef = useRef(pinStates);
   pinStatesRef.current = pinStates;
   const liveBaseRef = useRef<{ eventMaxTs: number; perfMs: number } | null>(null);
+
+  // Restore monitored pins from localStorage on mount
+  useEffect(() => {
+    const saved = loadMonitoredPins();
+    if (saved.size > 0) {
+      const store = useDeviceStore.getState();
+      for (const gpio of saved) {
+        if (!store.monitoredPins.has(gpio)) {
+          store.toggleMonitoredPin(gpio);
+        }
+      }
+    }
+  }, []);
+
+  // Save monitored pins to localStorage whenever they change
+  useEffect(() => {
+    saveMonitoredPins(monitoredPins);
+  }, [monitoredPins]);
 
   // Find all pins in INTERRUPT mode — stable via useMemo
   const interruptPins = useMemo(
@@ -55,10 +91,6 @@ export function WaveformPanel() {
       const gpios = pinnedGpiosRef.current;
       const nPins = gpios.length;
       if (nPins === 0) {
-        ctx.fillStyle = '#475569';
-        ctx.font = '12px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText('Waiting for pin data…', w / 2, h / 2);
         return;
       }
 

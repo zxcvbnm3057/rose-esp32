@@ -78,6 +78,11 @@ export const api = {
         }),
     uartSend: (uart_id: number, data: string) =>
         request('/uart/' + uart_id + '/send', { method: 'POST', body: JSON.stringify({ data }) }),
+    uartSendHex: (uart_id: number, hexStr: string) => {
+        const bytes = hexStr.split(/\s+/).filter(Boolean).map((h) => parseInt(h, 16));
+        const base64 = btoa(String.fromCharCode(...bytes));
+        return request('/uart/' + uart_id + '/send', { method: 'POST', body: JSON.stringify({ data_base64: base64 }) });
+    },
     uartRead: (uart_id: number, length = 256, timeout_ms = 3000) =>
         request('/uart/' + uart_id + '/read?length=' + length + '&timeout_ms=' + timeout_ms),
 
@@ -100,6 +105,17 @@ export const api = {
         request('/ble/scan/start', { method: 'POST', body: JSON.stringify({ interval_s }) }),
     bleScanStop: () =>
         request('/ble/scan/stop', { method: 'POST' }),
+
+    // ── BLE Device Names ──────────────────────────────
+    listBleDeviceNames: () =>
+        request<{ data: { names: { mac: string; name: string }[] } }>('/ble/device-names'),
+    setBleDeviceName: (mac: string, name: string) =>
+        request('/ble/device-names/' + encodeURIComponent(mac), {
+            method: 'PUT',
+            body: JSON.stringify({ name }),
+        }),
+    deleteBleDeviceName: (mac: string) =>
+        request('/ble/device-names/' + encodeURIComponent(mac), { method: 'DELETE' }),
 
     // ── System ────────────────────────────────────────
     ping: () =>

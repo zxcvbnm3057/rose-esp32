@@ -8,6 +8,10 @@ function fmtHex(bytes: number[]): string {
   return bytes.map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
 }
 
+function fmtAscii(bytes: number[]): string {
+  return bytes.map((b) => (b >= 0x20 && b <= 0x7e ? String.fromCharCode(b) : '.')).join('');
+}
+
 export function UartConsole() {
   const uartStates = useDeviceStore((s) => s.uartStates);
   const uartMessages = useDeviceStore((s) => s.uartMessages);
@@ -18,6 +22,8 @@ export function UartConsole() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [input, setInput] = useState('');
   const [selectedUart, setSelectedUart] = useState<number | null>(null);
+  const [hexMode, setHexMode] = useState(true);
+  const [displayHex, setDisplayHex] = useState(true);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -38,19 +44,25 @@ export function UartConsole() {
 
   const handleSend = useCallback(async () => {
     if (selectedUart == null || !input.trim()) return;
-    const hex = input.trim();
-    // Validate hex string (allow space-separated hex bytes)
-    if (!/^[0-9a-fA-F\s]+$/.test(hex)) return;
     try {
-      await api.uartSend(selectedUart, hex);
-      // Parse bytes for display
-      const bytes = hex.split(/\s+/).filter(Boolean).map((h) => parseInt(h, 16));
-      useDeviceStore.getState().addUartMessage({
-        uart_id: selectedUart, dir: 'tx', data: bytes, timestamp: Date.now(),
-      });
+      if (hexMode) {
+        const hex = input.trim();
+        if (!/^[0-9a-fA-F\s]+$/.test(hex)) return;
+        await api.uartSendHex(selectedUart, hex);
+        const bytes = hex.split(/\s+/).filter(Boolean).map((h) => parseInt(h, 16));
+        useDeviceStore.getState().addUartMessage({
+          uart_id: selectedUart, dir: 'tx', data: bytes, timestamp: Date.now(),
+        });
+      } else {
+        await api.uartSend(selectedUart, input);
+        const bytes = Array.from(input, (c) => c.charCodeAt(0));
+        useDeviceStore.getState().addUartMessage({
+          uart_id: selectedUart, dir: 'tx', data: bytes, timestamp: Date.now(),
+        });
+      }
       setInput('');
     } catch { /* ignore */ }
-  }, [selectedUart, input]);
+  }, [selectedUart, input, hexMode]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter') handleSend();
@@ -66,12 +78,21 @@ export function UartConsole() {
           <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
           UART Monitor
         </span>
-        <button
-          onClick={() => clearUartMessages()}
-          className="text-xs text-gray-600 hover:text-gray-400"
-        >
-          clear
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setDisplayHex(!displayHex)}
+            className={`text-[10px] px-1.5 py-0.5 rounded ${displayHex ? 'bg-blue-700 text-blue-200' : 'bg-gray-700 text-gray-400'}`}
+            title="切换 16进制/ASCII 显示"
+          >
+            {displayHex ? 'HEX' : 'ASC'}
+          </button>
+          <button
+            onClick={() => clearUartMessages()}
+            className="text-xs text-gray-600 hover:text-gray-400"
+          >
+            clear
+          </button>
+        </div>
       </div>
 
       {/* Messages */}
@@ -83,7 +104,7 @@ export function UartConsole() {
           const colorIdx = (msg.uart_id % COLORS.length);
           const color = COLORS[colorIdx];
           const dirChar = msg.dir === 'rx' ? '←' : '→';
-          const hex = fmtHex(msg.data);
+          const formatted = displayHex ? fmtHex(msg.data) : fmtAscii(msg.data);
           return (
             <div key={i} className="flex gap-2 hover:bg-gray-900/50">
               <span className="text-gray-600 shrink-0 w-14 text-right">
@@ -95,7 +116,7 @@ export function UartConsole() {
                 UART{msg.uart_id}&gt;
               </span>
               <span className="text-gray-500 w-3 shrink-0 text-center">{dirChar}</span>
-              <span className="text-gray-300 break-all">{hex}</span>
+              <span className="text-gray-300 break-all">{formatted}</span>
             </div>
           );
         })}
@@ -113,13 +134,22 @@ export function UartConsole() {
           ))}
         </select>
         <span className="text-gray-600 text-xs shrink-0">&lt;&lt;</span>
+        <button
+          onClick={() => setHexMode(!hexMode)}
+          className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${
+            hexMode ? 'bg-blue-700 text-blue-200' : 'bg-emerald-700 text-emerald-200'
+          }`}
+          title={hexMode ? '当前: 16进制输入' : '当前: 文本输入'}
+        >
+          {hexMode ? 'HEX' : 'TXT'}
+        </button>
         <input
           ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           disabled={!connected}
-          placeholder="HEX bytes e.g. FE EE"
+          placeholder={hexMode ? 'HEX bytes e.g. FE EE' : 'Text e.g. hello'}
           className="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-0.5 text-xs text-gray-200 font-mono placeholder-gray-600 focus:outline-none focus:border-gray-500"
           spellCheck={false}
         />

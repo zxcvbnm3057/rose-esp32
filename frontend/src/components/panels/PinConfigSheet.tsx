@@ -75,6 +75,7 @@ export function PinConfigSheet({ embedded }: Props) {
 
   // ── UART active state (send/read) ──
   const [uartSendData, setUartSendData] = useState('');
+  const [uartHexMode, setUartHexMode] = useState(false);
   const [uartReadLen, setUartReadLen] = useState(256);
   const [uartReadResult, setUartReadResult] = useState<string | null>(null);
 
@@ -205,8 +206,18 @@ export function PinConfigSheet({ embedded }: Props) {
   const handleUartSend = async () => {
     if (!uartSendData.trim()) return;
     try {
-      await api.uartSend(activeUartId, uartSendData);
-      addHistory({ time: now(), op: `UART${activeUartId} TX`, result: `→ ${uartSendData.slice(0, 40)}` });
+      if (uartHexMode) {
+        const hex = uartSendData.trim();
+        if (!/^[0-9a-fA-F\s]+$/.test(hex)) {
+          addHistory({ time: now(), op: `UART${activeUartId} TX`, result: '✗ 无效的16进制数据' });
+          return;
+        }
+        await api.uartSendHex(activeUartId, hex);
+        addHistory({ time: now(), op: `UART${activeUartId} TX`, result: `→ [HEX] ${hex.slice(0, 40)}` });
+      } else {
+        await api.uartSend(activeUartId, uartSendData);
+        addHistory({ time: now(), op: `UART${activeUartId} TX`, result: `→ ${uartSendData.slice(0, 40)}` });
+      }
     } catch (e: unknown) {
       addHistory({ time: now(), op: `UART${activeUartId} TX`, result: `✗ ${(e as Error).message}` });
     }
@@ -318,11 +329,21 @@ export function PinConfigSheet({ embedded }: Props) {
           <div>
             <label className="text-xs text-gray-500 block mb-1">发送数据</label>
             <div className="flex gap-1">
+              <button
+                onClick={() => setUartHexMode(!uartHexMode)}
+                className={`text-[10px] px-1.5 py-1 rounded ${
+                  uartHexMode ? 'bg-blue-700 text-blue-200' : 'bg-emerald-700 text-emerald-200'
+                }`}
+                title={uartHexMode ? '当前: 16进制输入' : '当前: 文本输入'}
+              >
+                {uartHexMode ? 'HEX' : 'TXT'}
+              </button>
               <input
                 value={uartSendData}
                 onChange={(e) => setUartSendData(e.target.value)}
-                placeholder="hello"
-                className="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200"
+                placeholder={uartHexMode ? 'FE EE' : 'hello'}
+                className="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 font-mono"
+                spellCheck={false}
               />
               <button onClick={handleUartSend}
                 className="px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded text-xs">

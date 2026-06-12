@@ -440,7 +440,7 @@ typedef struct
 extern gpio_status_t gpio_table[31];
 extern uart_status_t uart_table[IOT_UART_NUM_MAX];
 extern thread_device_t thread_table[16]; // Max 16 devices
-extern ble_peer_t ble_peer_table[8];     // Max 8 BLE peers (LRU eviction)
+int ble_encrypted_peer_count(void);
 extern QueueHandle_t cmd_queue;
 extern QueueHandle_t send_queue;
 extern SemaphoreHandle_t resource_mutex;

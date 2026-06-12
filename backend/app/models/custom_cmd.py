@@ -44,6 +44,15 @@ class PinLock(Base):
     config_ts = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class BleDeviceName(Base):
+    """BLE device display name mapping (MAC → name)."""
+    __tablename__ = "ble_device_names"
+
+    mac = Column(String(64), primary_key=True)
+    name = Column(String(256), nullable=False, default="")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class UartConfigModel(Base):
     """Persisted UART configuration so it survives chip reset / page refresh."""
     __tablename__ = "uart_configs"
