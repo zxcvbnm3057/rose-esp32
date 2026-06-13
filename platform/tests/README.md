@@ -8,7 +8,7 @@ cd platform
 # Mock 模式（无需 ESP32，使用内存 ASGI 客户端）
 .\.conda\python.exe -m pytest tests/ -v
 
-# 真实设备模式（需先启动后端 + ESP32 已连接）
+# 真实设备模式（需先启动 platform + ESP32 已连接）
 .\.conda\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &
 $env:USE_REAL_DEVICE=1
 .\.conda\python.exe -m pytest tests/ -v
@@ -23,8 +23,8 @@ $env:USE_REAL_DEVICE=1
 
 ### Real 模式要求
 
-1. 后端已启动在 `127.0.0.1:8000`
-2. ESP32 通过 TCP 已连接到后端桥接端口 (8080)
+1. platform 已启动在 `127.0.0.1:8000`
+2. ESP32 通过 TCP 已连接到 platform 桥接端口 (8080)
 3. 硬件连接已完成（参照 `tests/HARDWARE_SETUP.md`）：
    - GPIO5 ↔ GPIO4（信号/GPIO 回路）
    - GPIO1 ↔ GPIO3（UART 回路）
@@ -33,7 +33,7 @@ $env:USE_REAL_DEVICE=1
 
 | 测试 | 原因 |
 |------|------|
-| `test_ws_new_connection_kicks_old` | WebSocket 单客户端踢出逻辑时序敏感，需手动验证 |
+| `test_ws_multiple_connections_coexist` | 多客户端并发逻辑在 mock 已覆盖；real 模式通常不单独验证 |
 | `test_ws_send_gpio_*` (real) | WS 透传命令使用 TestClient 模拟路径 |
 | `test_ws_receives_expected_state` (real) | ASGITransport 不支持 WS；real 模式手动验证 |
 | `test_gpio_config` (real) | ESP32 GPIO 多次重配后不稳定，bridge 测试全覆盖 |
@@ -52,16 +52,16 @@ $env:USE_REAL_DEVICE=1
 ### Real 设备 (ESP32-C6-DevKitM-1)
 
 ```
-89 passed, 3 skipped
+92 passed, 14 skipped
 ```
 
 ### Mock 模式
 
 ```
-92 passed, 1 skipped (test_ws_receives_expected_state — real 模式专用)
+109 passed, 1 skipped (test_ws_receives_expected_state — real 模式专用)
 ```
 
-> 共 93 个用例。Mock 模式下仅 `test_ws_receives_expected_state` 跳过（ASGITransport 不支持 WS 握手，real 模式手动验证）。
+> 共 110 个用例。Mock 模式下仅 `test_ws_receives_expected_state` 跳过（ASGITransport 不支持 WS 握手，real 模式手动验证）。
 
 ### 测试文件索引
 
@@ -70,13 +70,13 @@ $env:USE_REAL_DEVICE=1
 | `test_bridge_protocol.py` | 所有协议 dataclass from_bytes 解析 + MessageFrame + opcode 唯一性 + BLE 边界 | 33 |
 | `test_bridge_events.py` | EventHandler opcode→class 分发 (22 事件) + BLE 命令 + 边界 | 25 |
 | `test_ble.py` | BLE API (5) + PIN 格式/响应结构 + 事件 to_dict (8种) + 缓存 + 设备名 CRUD (5) | 23 |
-| `test_ws.py` | WS 连接/命令 + event_to_dict (BLE 8种 + GPIO/UART) | 16 |
+| `test_ws.py` | WS 多客户端/角色权限 + WS 命令 + event_to_dict (BLE 8种 + GPIO/UART) | 19 |
 | `test_pins.py` | Pin Lock CRUD + Expected State + UART 持久化 + WS expected_state | 12 |
 | `test_custom_cmd.py` | 自定义指令 CRUD + 执行 (含结构化 config) | 13 |
 | `test_gpio.py` | GPIO config/set/get/adc + 保留引脚 + 边界 + 错误路径 (404/502/503) | 10 |
 | `test_hardware.py` | 硬件配置 API + 能力检查 + Thread 不支持 | 3 |
 | `test_port.py` | 端口 bind/unbind/status | 3 |
-| `test_signal.py` | 信号 tx/rx/exchange + 边界 | 4 |
+| `test_signal.py` | 信号 tx/rx/exchange + 边界 + resolution 透传 | 7 |
 | `test_system.py` | 设备状态/ping/heartbeat/sync/thread | 6 |
 | `test_uart.py` | UART config/send/read + base64 编码 | 5 |
 
@@ -88,6 +88,27 @@ $env:USE_REAL_DEVICE=1
 | `test_gpio_config_unknown_pin` | 未知 GPIO → 404 | Mock + Real |
 | `test_gpio_get_device_not_connected` | 设备未连接 → 503 (`check_connected`) | Mock 专用 |
 | `test_gpio_get_bridge_failure_returns_502` | bridge 命令返回 None → 502 (`check_bridge_ok`) | Mock 专用 |
+| `test_signal_exchange_resolution_passthrough` / `test_signal_rx_resolution_passthrough` / `test_signal_resolutions_endpoint` | resolution 软件透传 + 预设列表接口 | Mock 主覆盖 |
+| `test_ws_default_role_app_cannot_control` / `test_ws_role_app_can_read` / `test_ws_role_console_can_control` / `test_ws_unregistered_command_rejected_even_for_console` / `test_ws_multiple_connections_coexist` | WS 默认 `app` 只读、`console` 控制、多客户端并发、未注册命令默认拒绝 | Mock + Real(部分) |
+
+### WebSocket 行为说明（当前设计）
+
+`/ws` 现为**多客户端模型**，不再是旧的单客户端踢出模式：
+
+| 角色 | 连接方式 | 能力 |
+|------|----------|------|
+| `app` | `/ws` 或 `/ws?role=app` | 默认角色；只读订阅 + 读命令 |
+| `console` | `/ws?role=console` | 控制台；可读 + 控制命令 |
+
+当前 WS 白名单命令：
+
+| op | 权限 | 允许角色 |
+|----|------|----------|
+| `gpio_get` | `read` | `app`, `console` |
+| `adc_sample` | `read` | `app`, `console` |
+| `gpio_set` | `control` | `console` |
+
+未显式登记的命令（如 `gpio_config`）即使是 `console` 也会被拒绝。这是平台层的防越权设计。
 
 
 ### BLE 测试覆盖矩阵

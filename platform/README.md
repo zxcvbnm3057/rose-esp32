@@ -1,6 +1,6 @@
 # Rose-ESP32 Platform
 
-Python FastAPI 平台层，作为公共底层连接 ESP32 IoT Agent、上层业务后端与操作界面。
+Python FastAPI 平台层，作为公共底层连接 ESP32 IoT Agent、上层业务后端（`app/`）与操作界面（`console/`）。
 
 ## 架构
 
@@ -37,6 +37,8 @@ cd platform
 
 ## API
 
+详细接口文档见：[`API.md`](./API.md)
+
 | 路径 | 方法 | 说明 |
 |------|------|------|
 | `/api/v1/device/status` | GET | 设备连接状态 |
@@ -52,7 +54,28 @@ cd platform
 | `/api/v1/ble/scan/stop` | POST | 停止 RSSI 扫描 |
 | `/api/v1/pins/locks` | GET/POST/DELETE | Pin 锁定管理 |
 | `/api/v1/uart/{n}/send` | POST | UART 发送 |
-| `/ws` | WebSocket | 实时状态推送 |
+| `/ws` | WebSocket | 多客户端实时状态推送 + 受限指令通道 |
+
+## WebSocket 角色模型
+
+`/ws` 支持多个客户端同时接入，并按角色进行权限控制：
+
+| 角色 | 连接方式 | 能力 |
+|------|----------|------|
+| `app` | `/ws` 或 `/ws?role=app` | 默认角色；只读。可订阅事件、读取数据、发只读类 WS 指令 |
+| `console` | `/ws?role=console` | 控制台角色；可订阅事件，并允许执行控制类 WS 指令 |
+
+### 当前 WS 指令白名单
+
+平台层不会把所有 REST/硬件能力都暴露到 WebSocket。只有**显式登记**的指令才允许通过 WS 调用，未登记指令一律拒绝，避免未来新增命令时出现越权。
+
+| op | 权限类别 | 允许角色 | 说明 |
+|----|----------|----------|------|
+| `gpio_get` | `read` | `app`, `console` | 读取 GPIO 输入值 |
+| `adc_sample` | `read` | `app`, `console` | 读取 ADC 采样值 |
+| `gpio_set` | `control` | `console` | 设置 GPIO 输出值 |
+
+像 `gpio_config`、BLE 配对开关、UART 配置、端口绑定等敏感/改配类能力，当前**不通过 WS 暴露**；如未来需要开放，必须先在平台层显式登记权限。
 
 ## 测试
 
@@ -68,8 +91,10 @@ $env:USE_REAL_DEVICE=1
 ## 事件流
 
 ```
-ESP32 ──TCP──→ bridge_service ──event──→ WS Manager ──→ 前端
-                                       └──→ API cache
+ESP32 ──TCP──→ bridge_service ──event──→ WS Manager ──→ console (role=console)
+                                       │
+                                       ├──→ app backends (role=app, multi-client)
+                                       └──→ API/state cache
 ```
 
-WS 事件类型: `hardware_config`, `device_state`, `ble_status`, `ble_peers_list`, `gpio_value`, `uart_rx` 等。
+WS 事件类型: `hardware_config`, `connection_change`, `expected_state`, `device_state`, `ble_status`, `ble_peers_list`, `gpio_value`, `uart_rx` 等。

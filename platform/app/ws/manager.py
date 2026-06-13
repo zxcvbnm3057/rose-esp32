@@ -1,7 +1,6 @@
-"""WebSocket connection manager — single-client mode."""
+"""WebSocket connection manager — multi-client mode with per-connection roles."""
 from __future__ import annotations
 import asyncio
-import json
 import logging
 from typing import Any
 from fastapi import WebSocket
@@ -10,49 +9,49 @@ logger = logging.getLogger(__name__)
 
 
 class ConnectionManager:
-    """Manages WebSocket connections — only ONE active client at a time."""
+    """Manages multiple WebSocket connections.
+
+    Each connection has a logical role:
+      - ``console``: hardware operator UI, allowed to issue control commands
+      - ``app``: business backend, read-only (subscribe / read data only)
+
+    Broadcasting is fan-out to all connected clients.
+    """
 
     def __init__(self):
-        self._ws: WebSocket | None = None
+        self._clients: dict[WebSocket, str] = {}
         self._lock = asyncio.Lock()
 
     @property
     def active_count(self) -> int:
-        return 1 if self._ws is not None else 0
+        return len(self._clients)
 
-    async def connect(self, ws: WebSocket):
-        """Accept new WS, kick old one if any."""
+    async def connect(self, ws: WebSocket, role: str = "console"):
+        """Accept a new WebSocket and register its role."""
         async with self._lock:
-            # Kick existing
-            if self._ws is not None:
-                old = self._ws
-                self._ws = None
-                try:
-                    await old.send_json({"type": "kicked", "reason": "new_connection"})
-                    await old.close(code=4001)
-                except Exception:
-                    pass
-                logger.info("Kicked old WS client for new connection")
-
             await ws.accept()
-            self._ws = ws
-            logger.info("WS connected (single client)")
+            self._clients[ws] = role
+            logger.info("WS connected role=%s active=%d", role, len(self._clients))
 
     async def disconnect(self, ws: WebSocket):
         async with self._lock:
-            if self._ws is ws:
-                self._ws = None
-                logger.info("WS disconnected")
+            role = self._clients.pop(ws, None)
+            if role is not None:
+                logger.info("WS disconnected role=%s active=%d", role, len(self._clients))
+
+    def role_of(self, ws: WebSocket) -> str | None:
+        return self._clients.get(ws)
 
     async def broadcast(self, data: dict[str, Any]):
-        """Send JSON to the single client."""
-        ws = self._ws
-        if ws is None:
+        """Broadcast JSON to all connected clients."""
+        if not self._clients:
             return
-        try:
-            await ws.send_json(data)
-        except Exception:
-            await self.disconnect(ws)
+        # Snapshot to avoid mutation during iteration.
+        for ws in list(self._clients.keys()):
+            try:
+                await ws.send_json(data)
+            except Exception:
+                await self.disconnect(ws)
 
     async def broadcast_event(self, event: dict[str, Any]):
         await self.broadcast(event)

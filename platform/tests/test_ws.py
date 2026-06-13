@@ -139,18 +139,51 @@ def test_ws_send_adc_sample(ws_client, mock_bridge):
         assert "success" in resp
 
 
-def test_ws_new_connection_kicks_old(ws_client, mock_bridge):
-    with ws_client.websocket_connect("/ws") as ws1:
+def test_ws_multiple_connections_coexist(ws_client, mock_bridge):
+    with ws_client.websocket_connect("/ws?role=app") as ws1:
         _ws_skip_init(ws1)  # drain init messages from ws1
-        with ws_client.websocket_connect("/ws") as ws2:
+        with ws_client.websocket_connect("/ws?role=console") as ws2:
             _ws_skip_init(ws2)  # drain init messages from ws2
-            # ws1 should receive "kicked" — may need to skip extra broadcast messages
-            for _ in range(20):
-                kicked = ws1.receive_json()
-                if kicked.get("type") == "kicked":
-                    assert kicked["type"] == "kicked"
-                    return
-            pytest.fail("ws1 never received kicked message")
+            # New connection should NOT kick old one anymore.
+            ws2.send_json({"type": "cmd", "op": "adc_sample", "gpio": 2, "samples": 4})
+            resp = _ws_expect_cmd_result(ws2)
+            assert "success" in resp
+
+
+def test_ws_default_role_app_cannot_control(ws_client, mock_bridge):
+    with ws_client.websocket_connect("/ws") as ws:
+        _ws_skip_init(ws)
+        ws.send_json({"type": "cmd", "op": "gpio_set", "gpio": 5, "value": 1})
+        resp = _ws_expect_cmd_result(ws)
+        assert resp["success"] is False
+        assert "not allowed" in resp["error"]
+
+
+def test_ws_role_app_can_read(ws_client, mock_bridge):
+    with ws_client.websocket_connect("/ws?role=app") as ws:
+        _ws_skip_init(ws)
+        ws.send_json({"type": "cmd", "op": "gpio_get", "gpio": 5})
+        resp = _ws_expect_cmd_result(ws)
+        assert "success" in resp
+
+
+def test_ws_role_console_can_control(ws_client, mock_bridge):
+    with ws_client.websocket_connect("/ws?role=console") as ws:
+        _ws_skip_init(ws)
+        ws.send_json({"type": "cmd", "op": "gpio_set", "gpio": 5, "value": 1})
+        resp = _ws_expect_cmd_result(ws)
+        assert "success" in resp
+
+
+def test_ws_unregistered_command_rejected_even_for_console(ws_client, mock_bridge):
+    with ws_client.websocket_connect("/ws?role=console") as ws:
+        _ws_skip_init(ws)
+        # gpio_config exists at REST level, but is intentionally NOT exposed on WS
+        # until it is explicitly registered with a permission class.
+        ws.send_json({"type": "cmd", "op": "gpio_config", "gpio": 5, "mode": 1})
+        resp = _ws_expect_cmd_result(ws)
+        assert resp["success"] is False
+        assert "unsupported WS op" in resp["error"]
 
 
 # ── Event parsing and dispatch (unit) ─────────────────────

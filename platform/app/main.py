@@ -218,7 +218,10 @@ app.include_router(custom_cmd_public_router, prefix="/cmd", tags=["public_cmds"]
 # ── WebSocket ─────────────────────────────────────────────────
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
-    await manager.connect(ws)
+    role = (ws.query_params.get("role") or "app").strip().lower()
+    if role not in ("console", "app"):
+        role = "app"
+    await manager.connect(ws, role=role)
 
     # Send hardware config + current connection state on connect
     from .config import load_hardware_config
@@ -285,19 +288,66 @@ async def websocket_endpoint(ws: WebSocket):
 
 
 async def _handle_ws_command(ws: WebSocket, msg: dict):
-    """Handle a command sent via WebSocket."""
+    """Handle a command sent via WebSocket.
+
+    Security model:
+      - only commands explicitly registered here are allowed over WS
+      - each command declares a permission class (read/control)
+      - business backends (role=app) are read-only
+      - operator UI (role=console) may invoke both read and control commands
+
+    This keeps the authorization surface explicit: when a new WS command is
+    added in the future, it MUST be registered here with an intentional role
+    policy instead of silently inheriting permissive behavior.
+    """
     op = msg.get("op", "")
+    role = manager.role_of(ws) or "app"
+
+    async def _cmd_gpio_set() -> dict:
+        ok = await bridge_service.gpio_set(msg["gpio"], msg["value"])
+        return {"success": ok, "data": {}}
+
+    async def _cmd_gpio_get() -> dict:
+        val = await bridge_service.gpio_get(msg["gpio"])
+        return {"success": val is not None, "data": {"value": val}}
+
+    async def _cmd_adc_sample() -> dict:
+        val = await bridge_service.adc_sample(msg["gpio"], msg.get("samples", 1))
+        return {"success": val is not None, "data": {"value": val}}
+
+    # Explicit WS command registry: op -> (permission_class, handler)
+    # read    : safe for business backends
+    # control : mutates hardware state; console only
+    command_registry: dict[str, tuple[str, callable]] = {
+        "gpio_get": ("read", _cmd_gpio_get),
+        "adc_sample": ("read", _cmd_adc_sample),
+        "gpio_set": ("control", _cmd_gpio_set),
+    }
+
+    allowed_by_role = {
+        "app": {"read"},
+        "console": {"read", "control"},
+    }
+
     try:
-        if op == "gpio_set":
-            ok = await bridge_service.gpio_set(msg["gpio"], msg["value"])
-            await ws.send_json({"type": "cmd_result", "op": op, "success": ok, "data": {}})
-        elif op == "gpio_get":
-            val = await bridge_service.gpio_get(msg["gpio"])
-            await ws.send_json({"type": "cmd_result", "op": op, "success": val is not None, "data": {"value": val}})
-        elif op == "adc_sample":
-            val = await bridge_service.adc_sample(msg["gpio"], msg.get("samples", 1))
-            await ws.send_json({"type": "cmd_result", "op": op, "success": val is not None, "data": {"value": val}})
+        if op not in command_registry:
+            await ws.send_json({
+                "type": "cmd_result",
+                "op": op,
+                "success": False,
+                "error": f"Unknown or unsupported WS op: {op}",
+            })
         else:
-            await ws.send_json({"type": "cmd_result", "op": op, "success": False, "error": f"Unknown op: {op}"})
+            permission_class, handler = command_registry[op]
+            if permission_class not in allowed_by_role.get(role, set()):
+                await ws.send_json({
+                    "type": "cmd_result",
+                    "op": op,
+                    "success": False,
+                    "error": f"Operation '{op}' is not allowed for role '{role}'",
+                })
+            else:
+                result = await handler()
+                await ws.send_json({"type": "cmd_result", "op": op, **result})
     except Exception as e:
         await ws.send_json({"type": "cmd_result", "op": op, "success": False, "error": str(e)})
