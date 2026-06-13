@@ -133,26 +133,25 @@ ESP32-DevKitC 开发板最小连接：
    ```
 
 4. **验证连接**：
-   ```bash
-   # 运行完整测试套件 (Mock: 120 passed / Real: 104 passed)
-   cd backend && .\.conda\python.exe -m pytest tests/ -v --tb=short
 
-   # 按类别运行
-   .\.conda\python.exe -m pytest tests/test_bridge_protocol.py tests/test_bridge_events.py -v
-   .\.conda\python.exe -m pytest tests/test_basic.py tests/test_edge.py tests/test_port_status.py -v
-   .\.conda\python.exe -m pytest tests/test_signal.py tests/test_uart.py tests/test_adc.py -v
-   .\.conda\python.exe -m pytest tests/test_ble.py tests/test_sync.py -v
-   .\.conda\python.exe -m pytest tests/test_pins.py tests/test_custom_cmd.py -v
+   > 测试命令、工作目录要求与运行模式详见本目录的 `README.md`。
+   > **bridge 测试必须在仓库根目录运行**（相对导入要求），不要 `cd` 进 `tests` 再跑。
 
-   # 跳过硬相关测试
-   SKIP_BLE_CONNECT_TESTS=1 pytest tests/ --ignore=tests/test_uart.py --ignore=tests/test_ble.py --ignore=tests/test_ble_events.py -v
+   ```powershell
+   # 仓库根目录
+   cd e:\CodeSpace\rose-esp32
 
-   # 启用需硬件的测试
-   RUN_ADC_TESTS=1 pytest tests/test_adc.py -v
-   # UART: 先接好 GPIO 1↔3 回环，再跑
-   pytest tests/test_uart.py -v
-   # BLE 连接: PC 蓝牙开启 + ESP32 广播中
-   pytest tests/test_ble_events.py -v
+   # 单元测试（无需硬件）
+   python -m pytest bridge/tests/test_protocol_commands.py bridge/tests/test_bridge_protocol.py -q
+
+   # 完整硬件套件（含全自动 BLE 配对）
+   $env:USE_REAL_DEVICE="1"
+   python -m pytest bridge/tests/ -p no:cacheprovider -q
+
+   # 按类别（硬件）
+   python -m pytest bridge/tests/test_basic.py bridge/tests/test_edge.py bridge/tests/test_port_status.py -q
+   python -m pytest bridge/tests/test_signal.py bridge/tests/test_uart.py bridge/tests/test_adc.py -q
+   python -m pytest bridge/tests/test_ble.py bridge/tests/test_ble_events.py -q
    ```
 
 ## 测试执行顺序

@@ -38,20 +38,22 @@ export const api = {
     // ── Signal ────────────────────────────────────────
     signalTx: (gpio: number, signal: { level: number; duration_us: number }[], delay_us = 0) =>
         request('/gpio/' + gpio + '/signal/tx', { method: 'POST', body: JSON.stringify({ signal, delay_us }) }),
-    signalRx: (gpio: number, timeout_us = 1_000_000, max_edges = 100) =>
-        request('/gpio/' + gpio + '/signal/rx', { method: 'POST', body: JSON.stringify({ timeout_us, max_edges }) }),
+    signalRx: (gpio: number, timeout_us = 1_000_000, max_edges = 100, resolution: number | string | null = null) =>
+        request('/gpio/' + gpio + '/signal/rx', { method: 'POST', body: JSON.stringify({ timeout_us, max_edges, resolution }) }),
     signalExchange: (
         gpio: number,
         tx_signal: { level: number; duration_us: number }[],
         delay_us = 0,
         rx_total_us = 500_000,
         rx_max_edges = 100,
-        rx_resolution_us = 1,
+        resolution: number | string | null = null,
     ) =>
         request('/gpio/' + gpio + '/signal/exchange', {
             method: 'POST',
-            body: JSON.stringify({ tx_signal, delay_us, rx_total_us, rx_max_edges, rx_resolution_us }),
+            body: JSON.stringify({ tx_signal, delay_us, rx_total_us, rx_max_edges, resolution }),
         }),
+    // Resolution presets for software glitch-merge (firmware always captures finest).
+    signalResolutions: () => request('/gpio/signal/resolutions'),
 
     // ── UART ──────────────────────────────────────────
     uartConfig: (

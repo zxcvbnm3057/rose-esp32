@@ -58,8 +58,10 @@ $env:USE_REAL_DEVICE=1
 ### Mock 模式
 
 ```
-92 passed, 1 failed (test_ws_new_connection_kicks_old — 已知WS时序敏感)
+92 passed, 1 skipped (test_ws_receives_expected_state — real 模式专用)
 ```
+
+> 共 93 个用例。Mock 模式下仅 `test_ws_receives_expected_state` 跳过（ASGITransport 不支持 WS 握手，real 模式手动验证）。
 
 ### 测试文件索引
 
@@ -67,16 +69,26 @@ $env:USE_REAL_DEVICE=1
 |------|---------|------|
 | `test_bridge_protocol.py` | 所有协议 dataclass from_bytes 解析 + MessageFrame + opcode 唯一性 + BLE 边界 | 33 |
 | `test_bridge_events.py` | EventHandler opcode→class 分发 (22 事件) + BLE 命令 + 边界 | 25 |
-| `test_ble.py` | BLE API (6) +  PIN 格式/响应结构 + 事件 to_dict (8种) + 缓存 | 18 |
+| `test_ble.py` | BLE API (5) + PIN 格式/响应结构 + 事件 to_dict (8种) + 缓存 + 设备名 CRUD (5) | 23 |
 | `test_ws.py` | WS 连接/命令 + event_to_dict (BLE 8种 + GPIO/UART) | 16 |
 | `test_pins.py` | Pin Lock CRUD + Expected State + UART 持久化 + WS expected_state | 12 |
 | `test_custom_cmd.py` | 自定义指令 CRUD + 执行 (含结构化 config) | 13 |
-| `test_gpio.py` | GPIO config/set/get/adc + 保留引脚 + 边界 | 7 |
+| `test_gpio.py` | GPIO config/set/get/adc + 保留引脚 + 边界 + 错误路径 (404/502/503) | 10 |
 | `test_hardware.py` | 硬件配置 API + 能力检查 + Thread 不支持 | 3 |
 | `test_port.py` | 端口 bind/unbind/status | 3 |
 | `test_signal.py` | 信号 tx/rx/exchange + 边界 | 4 |
 | `test_system.py` | 设备状态/ping/heartbeat/sync/thread | 6 |
 | `test_uart.py` | UART config/send/read + base64 编码 | 5 |
+
+### 新增覆盖（本轮补充）
+
+| 用例 | 覆盖缺口 | 模式 |
+|------|---------|------|
+| `test_ble_device_names_empty` / `_create` / `_update` / `_delete` / `_delete_nonexistent` | `/ble/device-names` GET/PUT/DELETE（设备名别名，纯 DB CRUD，此前零覆盖） | Mock + Real |
+| `test_gpio_config_unknown_pin` | 未知 GPIO → 404 | Mock + Real |
+| `test_gpio_get_device_not_connected` | 设备未连接 → 503 (`check_connected`) | Mock 专用 |
+| `test_gpio_get_bridge_failure_returns_502` | bridge 命令返回 None → 502 (`check_bridge_ok`) | Mock 专用 |
+
 
 ### BLE 测试覆盖矩阵
 
@@ -86,7 +98,6 @@ $env:USE_REAL_DEVICE=1
 | 事件层 | `test_bridge_events.py` | BLE 7种事件 opcode→class 分发 + CmdBleStartScan/StopScan 序列化 |
 | API 层 | `test_ble.py` | 5 个 HTTP 端点 (配对启/停, peer列表, 扫描启/停) + PIN 格式验证 + 响应结构验证 + 8种 event_to_dict |
 | WS 层 | `test_ws.py` | 6 种 BLE 事件 WS 序列化 (peers_list, connected, disconnected, rssi, pairing_enabled, pairing_disabled) |
-| E2E | `tests/manual_ble_e2e.py` | 本机蓝牙 bleak 连接→PIN配对→常驻→断线感知→重连恢复 (7项) |
 
 ## 已知限制
 

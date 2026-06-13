@@ -212,12 +212,10 @@ class CmdGpioSignalExchange:
     delay_us: int
     rx_total_us: int
     rx_max_edges: int
-    rx_resolution_us: int
     tx_signal_data: List[Tuple[int, int]]
 
     def to_bytes(self) -> bytes:
-        data = struct.pack('<BHIIHI', self.gpio, self.tx_len, self.delay_us, self.rx_total_us, self.rx_max_edges,
-                           self.rx_resolution_us)
+        data = struct.pack('<BHIIH', self.gpio, self.tx_len, self.delay_us, self.rx_total_us, self.rx_max_edges)
         for level, duration in self.tx_signal_data:
             data += struct.pack('<BI', level, duration)
         return data

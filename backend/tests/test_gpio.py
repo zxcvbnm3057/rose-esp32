@@ -72,3 +72,40 @@ async def test_gpio_invalid_mode(client, mock_bridge):
 async def test_gpio_set_invalid_value(client, mock_bridge):
     res = await client.post("/api/v1/gpio/5/set", json={"value": 2})
     assert res.status_code == 422
+
+
+# ── Error paths ───────────────────────────────────────────
+
+@pytest.mark.anyio
+async def test_gpio_config_unknown_pin(client, mock_bridge):
+    """A GPIO not present in hardware_config returns 404."""
+    res = await client.post("/api/v1/gpio/250/config", json={"mode": 1})
+    assert res.status_code == 404
+    assert "not found" in res.json()["error"].lower()
+
+
+@pytest.mark.anyio
+async def test_gpio_get_device_not_connected(client, is_real):
+    """When the bridge reports no device, GPIO read returns 503."""
+    if is_real:
+        pytest.skip("real device is connected; disconnect path is mock-only")
+    from unittest.mock import patch
+    from app.services import bridge_service
+    with patch.object(bridge_service, "is_connected", return_value=False):
+        res = await client.get("/api/v1/gpio/5/get")
+    assert res.status_code == 503
+    assert "not connected" in res.json()["error"].lower()
+
+
+@pytest.mark.anyio
+async def test_gpio_get_bridge_failure_returns_502(client, is_real):
+    """When the bridge command fails (returns None), GPIO read returns 502."""
+    if is_real:
+        pytest.skip("bridge failure injection is mock-only")
+    from unittest.mock import patch, AsyncMock
+    from app.services import bridge_service
+    with patch.object(bridge_service, "is_connected", return_value=True), \
+         patch.object(bridge_service, "gpio_get", new=AsyncMock(return_value=None)):
+        res = await client.get("/api/v1/gpio/5/get")
+    assert res.status_code == 502
+

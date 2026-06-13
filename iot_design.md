@@ -132,8 +132,9 @@ typedef struct {
 ```c
 typedef struct {
     uint32_t session_version;
-    uint16_t resource_count;
-    uint16_t pending_count;
+    uint16_t pending_cmd_count;
+    uint16_t pending_thread_count;
+    uint16_t port_status_count;
     // followed by resource snapshot entries + pending result entries
 } event_sync_response_t;
 ```
@@ -271,13 +272,13 @@ typedef struct {
 
 | 事件 | 操作码 | 数据结构 |
 |------|--------|----------|
-| `EVENT_BLE_STATUS` | 0x67 | `pairing_enabled:u8`, `scan_enabled:u8`, `peer_count:u8`, `pairing_timeout_s:u32` |
-| `EVENT_BLE_PAIRING_ENABLED` | 0x68 | `pin_code:u8[6]`, `timeout_s:u32`（2B padding） |
-| `EVENT_BLE_PAIRING_DISABLED` | 0x69 | `reason:u8`（0=other, 1=timeout, 2=paired） |
-| `EVENT_BLE_PEERS_LIST` | 0x6A | `peer_count:u8` + N×`(mac:u8[6], rssi:i8)` |
+| `EVENT_BLE_PAIRING_ENABLED` | 0x60 | `pin_code:u8[6]`, `timeout_s:u32` |
+| `EVENT_BLE_PAIRING_DISABLED` | 0x61 | `reason:u8`（0=other, 1=timeout, 2=paired） |
 | `EVENT_BLE_PEER_CONNECTED` | 0x62 | `peer_mac:u8[6]`, `rssi:i8` |
 | `EVENT_BLE_PEER_DISCONNECTED` | 0x63 | `peer_mac:u8[6]`, `reason:u8` |
-| `EVENT_BLE_RSSI` | 0x64 | `peer_mac:u8[6]`, `rssi:i8`, `timestamp_us:u64` |
+| `EVENT_BLE_PEERS_LIST` | 0x64 | `peer_count:u8` + N×`(mac:u8[6], rssi:i8)` |
+| `EVENT_BLE_RSSI` | 0x65 | `peer_mac:u8[6]`, `rssi:i8`, `timestamp_us:u64` |
+| `EVENT_BLE_STATUS` | 0x67 | `pairing_enabled:u8`, `scan_enabled:u8`, `peer_count:u8`, `pairing_timeout_s:u32` |
 
 ### RSSI 后台扫描
 

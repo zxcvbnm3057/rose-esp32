@@ -143,7 +143,6 @@ typedef struct
     uint32_t delay_us;
     uint32_t rx_total_us;
     uint16_t rx_max_edges;
-    uint32_t rx_resolution_us;
     // tx sequence follows: tx_len * (1B level + 4B duration_us)
 } cmd_gpio_signal_exchange_t;
 
@@ -500,7 +499,6 @@ typedef struct
     uint8_t do_rx;
     uint32_t rx_total_us;
     uint16_t rx_max_edges;
-    uint32_t rx_resolution_us;
 } gpio_signal_tx_item_t;
 
 typedef struct

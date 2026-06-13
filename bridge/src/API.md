@@ -9,7 +9,7 @@ to communicate with ESP32 IoT Agent systems.
 
 ## Overview
 
-The Python bridge provides a complete implementation for communicating with ESP32 IoT Agent devices via TCP/IP. It handles all 25 commands and their associated event responses, with full type hints and error handling.
+The Python bridge provides a complete implementation for communicating with ESP32 IoT Agent devices via TCP/IP. It handles all commands and their associated event responses, with full type hints and error handling. The opcode set is defined in the firmware header `include/iot_agent.h` and mirrored in `bridge/protocol.py`.
 
 ## Installation & Setup
 
@@ -138,13 +138,21 @@ CMD_PORT_STATUS = 0x32             # Query resource status
 CMD_THREAD_PASSTHROUGH = 0x40      # Forward to Thread device
 ```
 
-#### BLE (4 operations)
+#### BLE (5 operations)
 
 ```python
 CMD_BLE_ENABLE_PAIRING = 0x50      # Start pairing mode
 CMD_BLE_DISABLE_PAIRING = 0x51     # Stop pairing mode
 CMD_BLE_GET_PEERS = 0x52           # List connected devices
 CMD_BLE_START_SCAN = 0x53          # Enable RSSI monitoring
+CMD_BLE_STOP_SCAN = 0x54           # Disable RSSI monitoring
+```
+
+#### Sync / Reliability (2 operations)
+
+```python
+CMD_SYNC_REQUEST = 0x01            # Request state snapshot after reconnect
+CMD_SYN = 0x02                     # Confirm receipt of ACK / downstream result
 ```
 
 #### System (2 operations)
@@ -152,6 +160,31 @@ CMD_BLE_START_SCAN = 0x53          # Enable RSSI monitoring
 ```python
 CMD_HEARTBEAT = 0xFE               # Keepalive probe
 CMD_PING = 0xFF                    # Echo request
+```
+
+#### Event Opcodes (uplink)
+
+```python
+EVENT_CMD_ACK = 0x20               # Command acknowledgement
+EVENT_GPIO_VALUE = 0x21            # GPIO read result
+EVENT_GPIO_EDGE = 0x22             # GPIO interrupt edge
+EVENT_ADC_VALUE = 0x23             # ADC sample result
+EVENT_GPIO_SIGNAL_CAPTURED = 0x24  # Captured signal edges
+EVENT_UART_RX = 0x30               # UART received data
+EVENT_UART_STATUS = 0x31           # UART config snapshot (sync)
+EVENT_THREAD_RESPONSE = 0x40       # Downstream device result
+EVENT_PORT_STATUS = 0x50           # Port status reply
+EVENT_GPIO_STATUS = 0x51           # GPIO config snapshot (sync)
+EVENT_BLE_PAIRING_ENABLED = 0x60   # PIN + timeout
+EVENT_BLE_PAIRING_DISABLED = 0x61  # reason
+EVENT_BLE_PEER_CONNECTED = 0x62    # peer connected
+EVENT_BLE_PEER_DISCONNECTED = 0x63 # peer disconnected
+EVENT_BLE_PEERS_LIST = 0x64        # peer list
+EVENT_BLE_RSSI = 0x65              # periodic RSSI
+EVENT_SYNC_RESPONSE = 0x66         # state snapshot reply
+EVENT_BLE_STATUS = 0x67            # BLE state snapshot (sync)
+EVENT_HEARTBEAT = 0xFD             # heartbeat echo
+EVENT_ERROR = 0xFE                 # error report
 ```
 
 ---

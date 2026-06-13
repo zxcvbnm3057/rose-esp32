@@ -550,8 +550,7 @@ void handle_command(msg_frame_t *frame)
             .rx_channel = -1,
             .do_rx = 1,
             .rx_total_us = cmd->rx_total_us,
-            .rx_max_edges = cmd->rx_max_edges,
-            .rx_resolution_us = cmd->rx_resolution_us};
+            .rx_max_edges = cmd->rx_max_edges};
 
         if (xQueueSend(get_signal_tx_queue(), &tx_item, pdMS_TO_TICKS(100)) != pdTRUE)
         {

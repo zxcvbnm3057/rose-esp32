@@ -175,11 +175,16 @@ value = client.get_gpio(6)
 client.stop()
 ```
 
-## All 25 Commands
+## Command Opcodes (Downlink)
 
-| ID | Command | Type | Purpose |
-|----|---------|------|---------|
-| 0x10 | CMD_GPIO_CONFIG | GPIO | Configure pin mode/pull |
+The single source of truth for all opcodes is the firmware header
+`include/iot_agent.h`; `bridge/protocol.py` mirrors it exactly.
+
+| ID | Command | Group | Purpose |
+|----|---------|-------|---------|
+| 0x01 | CMD_SYNC_REQUEST | Sync | Request device state snapshot after reconnect |
+| 0x02 | CMD_SYN | Sync | Confirm receipt of an ACK / downstream result |
+| 0x10 | CMD_GPIO_CONFIG | GPIO | Configure pin mode/pull/edge |
 | 0x11 | CMD_GPIO_SET | GPIO | Set output level |
 | 0x12 | CMD_GPIO_GET | GPIO | Read input level |
 | 0x13 | CMD_ADC_SAMPLE | GPIO | Sample ADC channel |
@@ -188,30 +193,78 @@ client.stop()
 | 0x16 | CMD_GPIO_SIGNAL_EXCHANGE | Signal | TX + delay + RX |
 | 0x20 | CMD_UART_CONFIG | UART | Initialize UART |
 | 0x21 | CMD_UART_SEND | UART | Send data |
-| 0x22 | CMD_UART_READ | UART | Read data |
+| 0x22 | CMD_UART_READ | UART | Poll-read data (loopback/compat) |
 | 0x30 | CMD_PORT_BIND | Port | Acquire resource |
 | 0x31 | CMD_PORT_UNBIND | Port | Release resource |
 | 0x32 | CMD_PORT_STATUS | Port | Query status |
-| 0x40 | CMD_THREAD_PASSTHROUGH | Thread | Forward to device |
-| 0x50 | CMD_BLE_ENABLE_PAIRING | BLE | Start pairing |
-| 0x51 | CMD_BLE_DISABLE_PAIRING | BLE | Stop pairing |
-| 0x52 | CMD_BLE_GET_PEERS | BLE | List peers |
-| 0x53 | CMD_BLE_START_SCAN | BLE | Start RSSI scan |
-| 0xFE | CMD_HEARTBEAT | System | Keepalive |
-| 0xFF | CMD_PING | System | Echo |
+| 0x40 | CMD_THREAD_PASSTHROUGH | Thread | Forward to downstream device |
+| 0x50 | CMD_BLE_ENABLE_PAIRING | BLE | Start pairing (timeout_s) |
+| 0x51 | CMD_BLE_DISABLE_PAIRING | BLE | Stop pairing (reason) |
+| 0x52 | CMD_BLE_GET_PEERS | BLE | List connected peers |
+| 0x53 | CMD_BLE_START_SCAN | BLE | Start RSSI scan (interval_s) |
+| 0x54 | CMD_BLE_STOP_SCAN | BLE | Stop RSSI scan |
+| 0xFE | CMD_HEARTBEAT | System | Host-initiated keepalive (timestamp) |
+| 0xFF | CMD_PING | System | Echo / liveness check |
 
-Plus additional debug/internal commands.
+> Note: `CMD_SYNC_REQUEST` (0x01) and `CMD_SYN` (0x02) reuse low opcode
+> values that do not collide with the 0x10+ functional commands. They are
+> distinguished by the message framing and dispatch path on the device.
+
+## Event Opcodes (Uplink)
+
+| ID | Event | Group | Payload summary |
+|----|-------|-------|-----------------|
+| 0x20 | EVENT_CMD_ACK | System | cmd_id, status, error_code, correlation_id |
+| 0x21 | EVENT_GPIO_VALUE | GPIO | gpio, value, timestamp_us |
+| 0x22 | EVENT_GPIO_EDGE | GPIO | gpio, edge_type, timestamp_us (INTERRUPT mode) |
+| 0x23 | EVENT_ADC_VALUE | GPIO | gpio, value, timestamp_us |
+| 0x24 | EVENT_GPIO_SIGNAL_CAPTURED | Signal | gpio, edge_count, timestamp_us, N×(level,duration_us) |
+| 0x30 | EVENT_UART_RX | UART | uart_id, length, timestamp_us, data |
+| 0x31 | EVENT_UART_STATUS | UART | full UART config snapshot (for sync) |
+| 0x40 | EVENT_THREAD_RESPONSE | Thread | device_id, correlation_id, timestamp_us, payload |
+| 0x50 | EVENT_PORT_STATUS | Port | resource_type, id, mode, owner, in_use, value |
+| 0x51 | EVENT_GPIO_STATUS | GPIO | full GPIO snapshot: mode/pull/edge/value/adc (for sync) |
+| 0x60 | EVENT_BLE_PAIRING_ENABLED | BLE | pin_code[6], timeout_s |
+| 0x61 | EVENT_BLE_PAIRING_DISABLED | BLE | reason (0=other,1=timeout,2=paired) |
+| 0x62 | EVENT_BLE_PEER_CONNECTED | BLE | peer_mac[6], rssi |
+| 0x63 | EVENT_BLE_PEER_DISCONNECTED | BLE | peer_mac[6], reason |
+| 0x64 | EVENT_BLE_PEERS_LIST | BLE | peer_count + N×(mac[6], rssi) |
+| 0x65 | EVENT_BLE_RSSI | BLE | peer_mac[6], rssi, timestamp_us |
+| 0x66 | EVENT_SYNC_RESPONSE | Sync | session_version + pending/port counts |
+| 0x67 | EVENT_BLE_STATUS | BLE | pairing_enabled, scan_enabled, peer_count, timeout_s |
+| 0xFD | EVENT_HEARTBEAT | System | timestamp, connection_state |
+| 0xFE | EVENT_ERROR | System | cmd_id, err_code, message |
+
+## Reliability: cmd / ack / syn flow
+
+`cmd_id` is the transport-level frame ID used for retransmission matching.
+`correlation_id` is the business-level key that ties a request, its
+`EVENT_CMD_ACK`, any downstream `EVENT_THREAD_RESPONSE`, and the final
+`CMD_SYN` together.
+
+- Most commands (GPIO/UART/port/BLE) reply with `EVENT_CMD_ACK` immediately
+  and are not buffered (port-bind idempotency relies on state queries, see
+  `iot_design.md` §9.5).
+- `CMD_THREAD_PASSTHROUGH` is the only command that carries an explicit
+  `correlation_id` and follows the full cmd → ack → syn → response → syn flow.
+- After a reconnect, the host should send `CMD_SYNC_REQUEST`; the device
+  replies with `EVENT_SYNC_RESPONSE` plus the retained BLE/thread/port data.
 
 ## Testing
 
-Run comprehensive protocol tests (no hardware required):
+Run protocol/event unit tests (no hardware required) from the project root:
 
 ```bash
-python -m pytest tests/test_comprehensive.py -v
-python -m pytest tests/test_gpio.py -v
-python -m pytest tests/test_signal.py -v
-python -m pytest tests/test_ble.py -v
-python -m pytest tests/test_integration.py -v
+python -m pytest bridge/tests/test_bridge_protocol.py -v
+python -m pytest bridge/tests/test_bridge_events.py -v
+```
+
+Hardware tests (real ESP32) require `USE_REAL_DEVICE=1`:
+
+```bash
+USE_REAL_DEVICE=1 python -m pytest bridge/tests/test_gpio.py -v
+USE_REAL_DEVICE=1 python -m pytest bridge/tests/test_signal.py -v
+USE_REAL_DEVICE=1 python -m pytest bridge/tests/test_integration.py -v
 ```
 
 ## Hardware Setup
@@ -241,7 +294,7 @@ This setup enables testing of all 25 commands with maximum hardware reuse.
 
 ```
 Byte 0:       Version (1)
-Byte 1:       Type (0x01=CMD, 0x03=EVENT)
+Byte 1:       Type (0x01=CMD, 0x02=ACK, 0x03=EVENT, 0x04=ERROR)
 Bytes 2-3:    Payload length (little-endian u16)
 Bytes 4-5:    Command ID (little-endian u16)
 Bytes 6-7:    CRC16 (little-endian u16)

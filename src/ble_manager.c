@@ -267,13 +267,22 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
             if (ble_pairing_enabled)
             {
                 rc = ble_gap_security_initiate(event->connect.conn_handle);
-                if (rc != 0)
+                if (rc == 0)
+                {
+                    ESP_LOGI(TAG, "Security initiated, waiting for passkey...");
+                }
+                else if (rc == BLE_HS_EALREADY)
+                {
+                    // Central (e.g. a PC) already started pairing/encryption.
+                    // This is the normal path for a central-initiated bond —
+                    // let it drive the SMP ceremony instead of rejecting.
+                    ESP_LOGI(TAG, "Security already in progress (central-initiated) — continuing");
+                }
+                else
                 {
                     ESP_LOGE(TAG, "security_initiate rc=%d — rejecting", rc);
                     ble_gap_terminate(event->connect.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
                 }
-                else
-                    ESP_LOGI(TAG, "Security initiated, waiting for passkey...");
             }
             else
                 ESP_LOGI(TAG, "Pairing disabled — accepting without new pairing");

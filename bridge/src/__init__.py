@@ -17,7 +17,7 @@ from .protocol import *
 from .server import IoTAgentServer
 from .commands import CommandDispatcher
 from .events import EventHandler
-from .client import IoTAgentClient
+from .client import IoTAgentClient, RESOLUTION_PRESETS, apply_resolution, resolve_resolution_us
 
 __version__ = "1.0.0"
 __all__ = [
@@ -25,6 +25,8 @@ __all__ = [
     "CommandDispatcher",
     "EventHandler",
     "IoTAgentClient",
+    # Signal resolution (software glitch-merge)
+    "RESOLUTION_PRESETS", "apply_resolution", "resolve_resolution_us",
     # Protocol constants
     "MSG_TYPE_CMD", "MSG_TYPE_ACK", "MSG_TYPE_EVENT", "MSG_TYPE_ERROR",
     "CMD_GPIO_CONFIG", "CMD_GPIO_SET", "CMD_GPIO_GET",

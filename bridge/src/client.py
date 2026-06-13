@@ -19,6 +19,85 @@ from .protocol import EVENT_SYNC_RESPONSE, EVENT_GPIO_VALUE, EVENT_ADC_VALUE, EV
 logger = logging.getLogger(__name__)
 
 
+# ── Signal resolution (software glitch-merge) ────────────────────────────
+#
+# The firmware always captures GPIO signals at the finest resolution
+# (RMT input filter fixed at 1 tick = 1us; pure-RX uses GPIO ISR which has
+# no filter at all).  "Resolution" is therefore applied here in software:
+# a pulse narrower than `resolution_us` is treated as a glitch — it is
+# dropped and its duration folded into the preceding edge, mirroring the
+# semantics of a hardware glitch filter.
+
+# Named resolution presets (microseconds).  `exact` means no merging.
+RESOLUTION_PRESETS: Dict[str, int] = {
+    "exact": 1,      # finest — keep every captured edge (>=1us)
+    "fine": 5,       # drop sub-5us spikes
+    "normal": 20,    # drop sub-20us noise (typical for slow logic)
+    "coarse": 100,   # drop sub-100us — only keep wide pulses
+}
+
+
+def resolve_resolution_us(resolution: "int | str | None") -> int:
+    """Normalize a resolution given as a preset name, an int (us), or None.
+
+    Returns the resolution in microseconds (>=1).  None / unknown -> 1 (exact).
+    """
+    if resolution is None:
+        return 1
+    if isinstance(resolution, str):
+        return RESOLUTION_PRESETS.get(resolution.strip().lower(), 1)
+    try:
+        return max(1, int(resolution))
+    except (TypeError, ValueError):
+        return 1
+
+
+def apply_resolution(edges: List[Tuple[int, int]], resolution_us: int) -> List[Tuple[int, int]]:
+    """Glitch-merge edges so no kept pulse is narrower than `resolution_us`.
+
+    Semantics (matches a hardware glitch filter):
+      - A pulse shorter than `resolution_us` is a glitch: it is removed and
+        its duration is added to the previous kept edge (so total elapsed
+        time is preserved).
+      - If a glitch occurs before any edge is kept, its duration is carried
+        forward onto the first kept edge.
+      - Consecutive same-level edges produced by a merge are coalesced.
+
+    `edges` is a list of (level, duration_us).  resolution_us <= 1 is a no-op.
+    """
+    if resolution_us <= 1 or not edges:
+        return list(edges)
+
+    merged: List[Tuple[int, int]] = []
+    carry = 0  # duration of dropped glitches waiting to be folded forward
+    for level, duration in edges:
+        if duration < resolution_us:
+            # Glitch: drop it but preserve elapsed time.
+            if merged:
+                plevel, pdur = merged[-1]
+                merged[-1] = (plevel, pdur + duration)
+            else:
+                carry += duration
+            continue
+        # Wide enough to keep.
+        duration += carry
+        carry = 0
+        if merged and merged[-1][0] == level:
+            # Same level as previous kept edge -> coalesce.
+            plevel, pdur = merged[-1]
+            merged[-1] = (plevel, pdur + duration)
+        else:
+            merged.append((level, duration))
+
+    # Any trailing carry (glitches at the very start with nothing kept yet)
+    # is folded onto the first edge if one exists.
+    if carry and merged:
+        flevel, fdur = merged[0]
+        merged[0] = (flevel, fdur + carry)
+    return merged
+
+
+
 class UartRxListener:
     """Per-UART RX listener queue."""
 
@@ -141,7 +220,8 @@ class IoTAgentClient:
     def receive_signal(self,
                        gpio: int,
                        timeout_us: int = 1000000,
-                       max_edges: int = 100) -> Optional[List[Tuple[int, int]]]:
+                       max_edges: int = 100,
+                       resolution: "int | str | None" = None) -> Optional[List[Tuple[int, int]]]:
         """Receive GPIO signal.
 
         Returns empty list [] when capture succeeded but no edges detected.
@@ -149,6 +229,11 @@ class IoTAgentClient:
         The ESP32 sends EVENT_GPIO_SIGNAL_CAPTURED (with edge_count possibly 0)
         followed by EVENT_CMD_ACK.  We consume the capture event; the ACK is
         handled by registered callbacks.
+
+        `resolution` selects the software glitch-merge granularity: a preset
+        name ("exact"/"fine"/"normal"/"coarse"), an int in microseconds, or
+        None (== "exact", keep every captured edge).  Pulses narrower than the
+        resolution are merged into the previous edge (see `apply_resolution`).
         """
         cmd_id = self.commands.gpio_signal_rx(gpio, timeout_us, max_edges)
         if cmd_id is None:
@@ -161,7 +246,7 @@ class IoTAgentClient:
         )
         if isinstance(response, EventGpioSignalCaptured):
             edges = [(edge.level, edge.duration_us) for edge in (response.edges or [])]
-            return edges  # empty list = valid capture with no edges
+            return apply_resolution(edges, resolve_resolution_us(resolution))
         return None
 
     def exchange_signals(self,
@@ -169,7 +254,8 @@ class IoTAgentClient:
                          tx_signal: List[Tuple[int, int]],
                          delay_us: int = 0,
                          rx_total_us: int = 1000000,
-                         rx_max_edges: int = 100) -> Optional[List[Tuple[int, int]]]:
+                         rx_max_edges: int = 100,
+                         resolution: "int | str | None" = None) -> Optional[List[Tuple[int, int]]]:
         """Exchange signals (TX then RX).
 
         Returns empty list [] when exchange succeeded but no edges captured.
@@ -177,6 +263,9 @@ class IoTAgentClient:
         The ESP32 sends EVENT_GPIO_SIGNAL_CAPTURED (with edge_count possibly 0)
         followed by EVENT_CMD_ACK.  We consume the capture event; the ACK is
         handled by registered callbacks.
+
+        `resolution` selects the software glitch-merge granularity (preset name,
+        int microseconds, or None == exact); see `receive_signal`.
         """
         cmd_id = self.commands.gpio_signal_exchange(gpio, tx_signal, delay_us, rx_total_us, rx_max_edges)
         if cmd_id is None:
@@ -189,7 +278,7 @@ class IoTAgentClient:
         )
         if isinstance(response, EventGpioSignalCaptured):
             edges = [(edge.level, edge.duration_us) for edge in (response.edges or [])]
-            return edges  # empty list = valid exchange with no edges captured
+            return apply_resolution(edges, resolve_resolution_us(resolution))
         return None
 
     # UART operations

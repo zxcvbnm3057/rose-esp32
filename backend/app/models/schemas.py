@@ -40,6 +40,9 @@ class SignalTxRequest(BaseModel):
 class SignalRxRequest(BaseModel):
     timeout_us: int = Field(default=1_000_000, ge=1)
     max_edges: int = Field(default=100, ge=1, le=256)
+    # Software glitch-merge resolution: preset name ("exact"/"fine"/"normal"/
+    # "coarse") or microseconds (int). None == "exact" (keep every edge).
+    resolution: int | str | None = Field(default=None)
 
 
 class SignalExchangeRequest(BaseModel):
@@ -47,7 +50,10 @@ class SignalExchangeRequest(BaseModel):
     delay_us: int = Field(default=0, ge=0)
     rx_total_us: int = Field(default=500_000, ge=1)
     rx_max_edges: int = Field(default=100, ge=1, le=256)
-    rx_resolution_us: int = Field(default=1, ge=1)
+    # Software glitch-merge resolution (preset name or microseconds). The
+    # firmware always captures at finest resolution; merging happens in the
+    # bridge client.  None == "exact".
+    resolution: int | str | None = Field(default=None)
 
 
 # ── UART ──────────────────────────────────────────────────────

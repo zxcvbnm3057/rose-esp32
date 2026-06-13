@@ -134,7 +134,8 @@ def test_ble_peers_list_event_to_dict():
     d = _event_to_dict("ble_peers_list", evt)
     assert d["peer_count"] == 1
     assert len(d["peers"]) == 1
-    assert d["peers"][0]["mac"] == "aabbccddeeff"
+    # MAC bytes are little-endian on the wire; displayed reversed + colon-separated.
+    assert d["peers"][0]["mac"] == "ff:ee:dd:cc:bb:aa"
     assert d["peers"][0]["rssi"] == -45
 
 def test_ble_peer_connected_event_to_dict():
@@ -142,7 +143,7 @@ def test_ble_peer_connected_event_to_dict():
     from app.services.bridge_service import _event_to_dict
     evt = EventBlePeerConnected(peer_mac=b'\x11\x22\x33\x44\x55\x66', rssi=-50)
     d = _event_to_dict("ble_peer_connected", evt)
-    assert d["mac"] == "112233445566"
+    assert d["mac"] == "66:55:44:33:22:11"
     assert d["rssi"] == -50
 
 def test_ble_peer_disconnected_event_to_dict():
@@ -150,7 +151,7 @@ def test_ble_peer_disconnected_event_to_dict():
     from app.services.bridge_service import _event_to_dict
     evt = EventBlePeerDisconnected(peer_mac=b'\xaa\xaa\xaa\xaa\xaa\xaa', reason=1)
     d = _event_to_dict("ble_peer_disconnected", evt)
-    assert d["mac"] == "aaaaaaaaaaaa"
+    assert d["mac"] == "aa:aa:aa:aa:aa:aa"
     assert d["reason"] == 1
 
 def test_ble_rssi_event_to_dict():
@@ -158,7 +159,7 @@ def test_ble_rssi_event_to_dict():
     from app.services.bridge_service import _event_to_dict
     evt = EventBleRssi(peer_mac=b'\xbb\xbb\xbb\xbb\xbb\xbb', rssi=-55, timestamp_us=12345)
     d = _event_to_dict("ble_rssi", evt)
-    assert d["mac"] == "bbbbbbbbbbbb"
+    assert d["mac"] == "bb:bb:bb:bb:bb:bb"
     assert d["rssi"] == -55
 
 
@@ -178,3 +179,68 @@ def test_ble_pairing_disabled_event_to_dict():
         evt = EventBlePairingDisabled(reason=reason_val)
         d = _event_to_dict("ble_pairing_disabled", evt)
         assert d["reason"] == reason_val
+
+
+# ── BLE device-name mappings CRUD ─────────────────────────
+# Pure DB CRUD (no bridge); runs in both mock and real mode.
+
+@pytest.mark.anyio
+async def test_ble_device_names_empty(client):
+    res = await client.get("/api/v1/ble/device-names")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    assert isinstance(data["data"]["names"], list)
+
+
+@pytest.mark.anyio
+async def test_ble_device_name_create(client):
+    mac = "aa:bb:cc:dd:ee:01"
+    res = await client.put(f"/api/v1/ble/device-names/{mac}", json={"name": "客厅传感器"})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["success"] is True
+    assert body["data"]["mac"] == mac
+    assert body["data"]["name"] == "客厅传感器"
+
+    # Confirm it shows up in the list
+    res2 = await client.get("/api/v1/ble/device-names")
+    names = {n["mac"]: n["name"] for n in res2.json()["data"]["names"]}
+    assert names.get(mac) == "客厅传感器"
+
+
+@pytest.mark.anyio
+async def test_ble_device_name_update(client):
+    mac = "aa:bb:cc:dd:ee:02"
+    await client.put(f"/api/v1/ble/device-names/{mac}", json={"name": "旧名字"})
+    res = await client.put(f"/api/v1/ble/device-names/{mac}", json={"name": "新名字"})
+    assert res.status_code == 200
+    assert res.json()["data"]["name"] == "新名字"
+
+    res2 = await client.get("/api/v1/ble/device-names")
+    names = {n["mac"]: n["name"] for n in res2.json()["data"]["names"]}
+    assert names.get(mac) == "新名字"
+    # Update must not create a duplicate row for the same MAC
+    assert sum(1 for n in res2.json()["data"]["names"] if n["mac"] == mac) == 1
+
+
+@pytest.mark.anyio
+async def test_ble_device_name_delete(client):
+    mac = "aa:bb:cc:dd:ee:03"
+    await client.put(f"/api/v1/ble/device-names/{mac}", json={"name": "待删除"})
+    res = await client.delete(f"/api/v1/ble/device-names/{mac}")
+    assert res.status_code == 200
+    assert res.json()["data"]["deleted"] is True
+
+    res2 = await client.get("/api/v1/ble/device-names")
+    macs = [n["mac"] for n in res2.json()["data"]["names"]]
+    assert mac not in macs
+
+
+@pytest.mark.anyio
+async def test_ble_device_name_delete_nonexistent(client):
+    # Deleting an unknown MAC is idempotent — returns success without error.
+    res = await client.delete("/api/v1/ble/device-names/00:00:00:00:00:00")
+    assert res.status_code == 200
+    assert res.json()["data"]["deleted"] is True
+

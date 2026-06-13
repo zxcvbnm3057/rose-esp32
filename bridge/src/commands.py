@@ -83,10 +83,13 @@ class CommandDispatcher:
                              tx_signal: List[Tuple[int, int]],
                              delay_us: int = 0,
                              rx_total_us: int = 1000000,
-                             rx_max_edges: int = 100,
-                             rx_resolution_us: int = 1) -> Optional[int]:
-        """Exchange GPIO signals (TX then RX)."""
-        cmd = CmdGpioSignalExchange(gpio, len(tx_signal), delay_us, rx_total_us, rx_max_edges, rx_resolution_us,
+                             rx_max_edges: int = 100) -> Optional[int]:
+        """Exchange GPIO signals (TX then RX).
+
+        The firmware always captures at finest resolution (RMT filter_ticks=1).
+        Resolution/glitch-merging is applied in software by the client layer.
+        """
+        cmd = CmdGpioSignalExchange(gpio, len(tx_signal), delay_us, rx_total_us, rx_max_edges,
                                     tx_signal)
         return self._send_command(CMD_GPIO_SIGNAL_EXCHANGE, cmd.to_bytes())
 

@@ -199,16 +199,22 @@ async def signal_tx(gpio: int, signal: list, delay_us: int = 0) -> bool:
     return await _run_sync(get_client().send_signal, gpio, tx, delay_us)
 
 
-async def signal_rx(gpio: int, timeout_us: int, max_edges: int) -> Optional[list]:
-    return await _run_sync(get_client().receive_signal, gpio, timeout_us, max_edges)
+async def signal_rx(gpio: int, timeout_us: int, max_edges: int,
+                    resolution: "int | str | None" = None) -> Optional[list]:
+    # resolution (preset name / int us / None) is applied as a software
+    # glitch-merge in the bridge client; firmware always captures at finest.
+    return await _run_sync(get_client().receive_signal, gpio, timeout_us, max_edges, resolution)
 
 
 async def signal_exchange(gpio: int, tx_signal: list, delay_us: int,
                           rx_total_us: int, rx_max_edges: int,
-                          rx_resolution_us: int = 1) -> Optional[list]:
+                          resolution: "int | str | None" = None) -> Optional[list]:
+    # Firmware captures at finest resolution; the bridge client applies the
+    # requested resolution (preset name or microseconds) in software via
+    # glitch-merging.  No clamp here — the client normalizes the value.
     tx = [(s["level"], s["duration_us"]) for s in tx_signal]
     return await _run_sync(get_client().exchange_signals,
-                           gpio, tx, delay_us, rx_total_us, rx_max_edges)
+                           gpio, tx, delay_us, rx_total_us, rx_max_edges, resolution)
 
 
 async def uart_config(uart_id: int, baudrate: int, tx_gpio: int, rx_gpio: int,

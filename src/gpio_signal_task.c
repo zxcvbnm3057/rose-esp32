@@ -321,14 +321,10 @@ void gpio_signal_tx_task(void *pvParameters)
                 // RX phase if requested
                 if (item.do_rx)
                 {
-                    // 80MHz / clk_div=80 -> 1 tick = 1us
-                    uint16_t filter_ticks = (item.rx_resolution_us > 0 && item.rx_resolution_us < 255)
-                                                ? (uint16_t)item.rx_resolution_us
-                                                : 1;
-                    if (filter_ticks == 0)
-                    {
-                        filter_ticks = 1;
-                    }
+                    // clk_div=80 -> 1 tick = 1us. 固件始终以最细分辨率采集
+                    // (filter_ticks=1, 只滤掉 <1us 的硬件噪声)；分辨率/毛刺合并
+                    // 由 bridge 软件层处理，芯片不承担该逻辑。
+                    uint16_t filter_ticks = 1;
                     // End RX frame after a quiet period; avoids indefinite/empty capture behavior.
                     uint16_t idle_ticks = (item.rx_total_us > 0) ? (uint16_t)((item.rx_total_us > 60000) ? 60000 : item.rx_total_us) : 10000;
 
@@ -466,11 +462,8 @@ void gpio_signal_tx_task(void *pvParameters)
 
                 // --- RX phase (same logic as TX+RX path) ---
                 {
-                    uint16_t filter_ticks = (item.rx_resolution_us > 0 && item.rx_resolution_us < 255)
-                                                ? (uint16_t)item.rx_resolution_us
-                                                : 1;
-                    if (filter_ticks == 0)
-                        filter_ticks = 1;
+                    // 始终最细分辨率采集；分辨率合并交给 bridge 软件层。
+                    uint16_t filter_ticks = 1;
                     uint16_t idle_ticks = (item.rx_total_us > 0) ? (uint16_t)((item.rx_total_us > 60000) ? 60000 : item.rx_total_us) : 10000;
 
                     rmt_config_t rx_config = {

@@ -27,7 +27,7 @@ async def signal_rx(gpio: int = Path(...), req: SignalRxRequest = None):
         raise HTTPException(status_code=501, detail="signal not supported")
     check_connected()
 
-    result = await bridge_service.signal_rx(gpio, req.timeout_us, req.max_edges)
+    result = await bridge_service.signal_rx(gpio, req.timeout_us, req.max_edges, req.resolution)
     check_bridge_ok(result, "Signal capture timed out or failed")
     return ApiResponse(success=True, data={
         "gpio": gpio, "edge_count": len(result),
@@ -43,9 +43,24 @@ async def signal_exchange(gpio: int = Path(...), req: SignalExchangeRequest = No
 
     tx_signal = [{"level": s.level, "duration_us": s.duration_us} for s in req.tx_signal]
     result = await bridge_service.signal_exchange(
-        gpio, tx_signal, req.delay_us, req.rx_total_us, req.rx_max_edges, req.rx_resolution_us)
+        gpio, tx_signal, req.delay_us, req.rx_total_us, req.rx_max_edges, req.resolution)
     check_bridge_ok(result, "Signal exchange failed or timed out")
     return ApiResponse(success=True, data={
         "gpio": gpio, "edge_count": len(result),
         "edges": [{"level": lv, "duration_us": dur} for lv, dur in result],
+    }, timestamp=time.time())
+
+
+@router.get("/signal/resolutions")
+async def list_signal_resolutions():
+    """List available signal-capture resolution presets (software glitch-merge).
+
+    Resolution is applied in the bridge client, not the firmware: a pulse
+    narrower than the chosen resolution is merged into the previous edge.
+    Clients may also pass a raw integer (microseconds) instead of a preset.
+    """
+    from ..bridge import RESOLUTION_PRESETS
+    return ApiResponse(success=True, data={
+        "presets": [{"name": k, "resolution_us": v} for k, v in RESOLUTION_PRESETS.items()],
+        "default": "exact",
     }, timestamp=time.time())
