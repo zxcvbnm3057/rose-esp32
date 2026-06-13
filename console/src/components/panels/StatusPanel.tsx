@@ -30,7 +30,7 @@ export function StatusPanel() {
   const [editingMac, setEditingMac] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
 
-  // Load device names from backend
+  // Load device names from platform
   const loadDeviceNames = useCallback(async () => {
     try {
       const res = await api.listBleDeviceNames() as { data: { names: { mac: string; name: string }[] } };

@@ -60,7 +60,7 @@ EVENT_BLE_RSSI: int = 0x65
 EVENT_ERROR: int = 0xFE
 EVENT_HEARTBEAT: int = 0xFD
 
-# Extended status events (for backend bridge_service)
+# Extended status events (for platform bridge_service)
 # Must match firmware: include/iot_agent.h
 EVENT_GPIO_STATUS: int = 0x51
 EVENT_UART_STATUS: int = 0x31
@@ -628,7 +628,7 @@ class EventError:
         return cls(cmd_id, err_code, message)
 
 
-# ── Extended status event structures (for backend) ──────────────────────
+# ── Extended status event structures (for platform) ──────────────────────
 
 @dataclass
 class EventUartStatus:

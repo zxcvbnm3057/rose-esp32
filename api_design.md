@@ -27,7 +27,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                     Frontend (React)                     │
+│                     Console (React)                      │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────────┐ │
 │  │ 芯片视图  │ │ IO 编辑  │ │ 手动指令  │ │ 自定义指令  │ │
 │  │(配置驱动) │ │          │ │          │ │            │ │
@@ -36,7 +36,7 @@
            │ REST         │ WebSocket    │
            ▼              ▼              │
 ┌─────────────────────────────────────────────────────────┐
-│                Backend (FastAPI + Uvicorn)               │
+│                Platform (FastAPI + Uvicorn)              │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────────┐ │
 │  │ REST API │ │   WS 推送 │ │ 指令引擎  │ │ 持久化存储  │ │
 │  │ /api/v1/ │ │   /ws    │ │ 序列化执行 │ │  SQLite    │ │
@@ -76,8 +76,8 @@
 ### 2.1 配置文件位置
 
 ```
-backend/hardware_config.json    ← 后端启动时加载
-frontend/public/hardware_config.json  ← 前端构建时内嵌（或通过 API 获取）
+platform/hardware_config.json    ← 平台层启动时加载
+console/public/hardware_config.json  ← 控制台构建时内嵌（或通过 API 获取）
 ```
 
 > 前端优先通过 `GET /api/v1/hardware/config` 动态获取，避免构建时写死。
@@ -195,7 +195,7 @@ hardware_config.json
 ### 目录结构
 
 ```
-backend/
+platform/
 ├── hardware_config.json          # ★ 硬件配置（前后端共享）
 ├── app/
 │   ├── __init__.py

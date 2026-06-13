@@ -1,5 +1,5 @@
 {
-    "name": "rose-esp32-frontend",
+    "name": "rose-esp32-console",
     "private": true,
     "version": "1.0.0",
     "type": "module",

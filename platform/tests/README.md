@@ -1,9 +1,9 @@
-# Backend API 测试
+# Platform API 测试
 
 ## 快速开始
 
 ```bash
-cd backend
+cd platform
 
 # Mock 模式（无需 ESP32，使用内存 ASGI 客户端）
 .\.conda\python.exe -m pytest tests/ -v

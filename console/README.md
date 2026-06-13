@@ -1,11 +1,11 @@
-# Rose-ESP32 Frontend
+# Rose-ESP32 Console
 
-React + TypeScript + Vite + Tailwind 前端，可视化管控 ESP32 IoT Agent。
+React + TypeScript + Vite + Tailwind 控制台界面，可视化管控 ESP32 IoT Agent。
 
 ## 架构
 
 ```
-frontend/
+console/
 ├── src/
 │   ├── App.tsx              # 主布局
 │   ├── main.tsx             # 入口
@@ -30,7 +30,7 @@ frontend/
 ## 快速开始
 
 ```bash
-cd frontend
+cd console
 npm install
 npx vite --host
 ```

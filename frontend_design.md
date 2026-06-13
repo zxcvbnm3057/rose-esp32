@@ -498,7 +498,7 @@ function useDeviceStatus() {
 ## 10. 目录结构
 
 ```
-frontend/
+console/
 ├── public/
 │   └── favicon.svg
 ├── src/

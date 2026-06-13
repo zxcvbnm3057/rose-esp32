@@ -368,5 +368,5 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
 
-backend/.conda
-backend/rose_iot.db
+.conda
+rose_iot.db

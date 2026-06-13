@@ -1,11 +1,11 @@
-# Rose-ESP32 Backend
+# Rose-ESP32 Platform
 
-Python FastAPI 后端，桥接 ESP32 IoT Agent 与 Web 前端。
+Python FastAPI 平台层，作为公共底层连接 ESP32 IoT Agent、上层业务后端与操作界面。
 
 ## 架构
 
 ```
-backend/
+platform/
 ├── app/
 │   ├── main.py          # FastAPI 入口 + WebSocket + 事件总线
 │   ├── config.py        # 硬件配置加载
@@ -23,7 +23,7 @@ backend/
 ## 快速开始
 
 ```bash
-cd backend
+cd platform
 
 # 安装依赖 (conda)
 .\.conda\python.exe -m pip install -r requirements.txt

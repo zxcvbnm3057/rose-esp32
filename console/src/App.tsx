@@ -38,7 +38,7 @@ export default function App() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Load persisted locks + expected states from backend on mount
+  // Load persisted locks + expected states from platform on mount
   useEffect(() => {
     (async () => {
       try {
