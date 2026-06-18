@@ -40,6 +40,8 @@ class FeatureRuntime:
     is_running: bool = False
     pending: deque[AppEvent] = field(default_factory=deque)
     worker_task: asyncio.Task[None] | None = None
+    # event_type -> handler resolved at registration time
+    handlers: dict[str, Any] = field(default_factory=dict)
 
 
 class AppScheduler:
@@ -108,6 +110,11 @@ class AppScheduler:
 
         for subscription in spec.subscriptions:
             self._subscriptions[subscription.event_type].append((spec.name, subscription.delivery_mode))
+            if subscription.handler is None:
+                raise ValueError(
+                    f"feature '{spec.name}' has no handler for event '{subscription.event_type}'"
+                )
+            runtime.handlers[subscription.event_type] = subscription.handler
 
     def features(self) -> dict[str, FeatureRuntime]:
         return self._features
@@ -185,7 +192,12 @@ class AppScheduler:
                     scheduler=self,
                     platform=self._platform,
                 )
-                await runtime.spec.handler(context)
+                handler = runtime.handlers.get(event.event_type)
+                if handler is None:
+                    raise RuntimeError(
+                        f"no handler resolved for event '{event.event_type}'"
+                    )
+                await handler(context)
             except asyncio.CancelledError:
                 raise
             except Exception:

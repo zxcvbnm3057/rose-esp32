@@ -35,14 +35,6 @@ static void encrypted_remove(uint16_t conn_handle)
     }
 }
 
-static bool encrypted_contains(uint16_t conn_handle)
-{
-    for (int i = 0; i < encrypted_count; i++)
-        if (encrypted_handles[i] == conn_handle)
-            return true;
-    return false;
-}
-
 uint8_t ble_pairing_enabled = 0;
 uint32_t ble_pairing_timeout_s = 0;
 uint32_t ble_pairing_start_time = 0;
@@ -126,6 +118,7 @@ static void ble_app_advertise(void);
 static void ble_host_task(void *pvParameters);
 static void ble_on_sync(void);
 static void ble_on_reset(int reason);
+static void ble_restart_advertising(void);
 
 /* ================================================================
  *  Init — NimBLE HID peripheral pattern (media device, no input)
@@ -192,8 +185,17 @@ static void ble_host_task(void *pvParameters)
 }
 
 /* ================================================================
- *  Advertising — declares HID service (0x1812) with media appearance
- *  Phones/PCs will identify this device as a HID media peripheral.
+ *  Advertising — two modes (discoverability only):
+ *   - Pairing mode ON  : general-discoverable, so new devices can
+ *                        be found and start the PIN pairing flow.
+ *   - Pairing mode OFF : non-discoverable. The device is still
+ *                        connectable (so already-paired devices can
+ *                        reconnect), but new devices cannot discover
+ *                        it via scanning. New devices that connect
+ *                        anyway are rejected at the app layer:
+ *                        PASSKEY_ACTION is refused while pairing is
+ *                        off, and unencrypted peers never enter the
+ *                        peer list — so they can do nothing useful.
  * ================================================================ */
 static void ble_app_advertise(void)
 {
@@ -202,7 +204,9 @@ static void ble_app_advertise(void)
     int rc;
 
     memset(&fields, 0, sizeof(fields));
-    fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
+    fields.flags = BLE_HS_ADV_F_BREDR_UNSUP;
+    if (ble_pairing_enabled)
+        fields.flags |= BLE_HS_ADV_F_DISC_GEN;
     fields.tx_pwr_lvl_is_present = 1;
     fields.tx_pwr_lvl = BLE_HS_ADV_TX_PWR_LVL_AUTO;
     fields.name = (uint8_t *)"ESP32-IoT";
@@ -229,7 +233,11 @@ static void ble_app_advertise(void)
 
     memset(&adv_params, 0, sizeof(adv_params));
     adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
-    adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
+    adv_params.disc_mode = ble_pairing_enabled ? BLE_GAP_DISC_MODE_GEN
+                                               : BLE_GAP_DISC_MODE_NON;
+    ESP_LOGI(TAG, "Advertising: %s",
+             ble_pairing_enabled ? "DISCOVERABLE (pairing mode)"
+                                 : "NON-DISCOVERABLE (paired devices reconnect only)");
 
     rc = ble_gap_adv_start(BLE_ADDR_PUBLIC, NULL, BLE_HS_FOREVER,
                            &adv_params, ble_gap_event, NULL);
@@ -238,7 +246,18 @@ static void ble_app_advertise(void)
         ESP_LOGE(TAG, "adv_start failed; rc=%d", rc);
         return;
     }
-    ESP_LOGI(TAG, "BLE Advertising started (HID media device)");
+}
+
+/* ================================================================
+ *  Restart advertising — stop the current advertisement (if any)
+ *  and re-start it so the discoverable/whitelist mode is re-applied.
+ *  Called whenever pairing mode is toggled at runtime.
+ * ================================================================ */
+static void ble_restart_advertising(void)
+{
+    if (ble_gap_adv_active())
+        ble_gap_adv_stop();
+    ble_app_advertise();
 }
 
 /* ================================================================
@@ -297,10 +316,10 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
         {
             uint16_t handle = event->disconnect.conn.conn_handle;
             encrypted_remove(handle);
-            struct ble_gap_conn_desc d;
             event_ble_peer_disconnected_t evt = {0};
-            if (ble_gap_conn_find(handle, &d) == 0)
-                memcpy(evt.peer_mac, d.peer_id_addr.val, 6);
+            // 连接此刻已断开，ble_gap_conn_find(handle) 会失败导致 MAC 全为 0。
+            // disconnect 事件本身携带对端连接描述符，直接取身份地址即可。
+            memcpy(evt.peer_mac, event->disconnect.conn.peer_id_addr.val, 6);
             evt.reason = event->disconnect.reason;
             send_event(EVENT_BLE_PEER_DISCONNECTED, &evt, sizeof(evt));
         }
@@ -323,12 +342,11 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
             ESP_LOGI(TAG, "Peer connected (encryption OK)");
             if (ble_pairing_enabled)
             {
-                ble_pairing_enabled = 0;
-                ble_pairing_timeout_s = 0;
-                event_ble_pairing_disabled_t evt2 = {0};
-                evt2.reason = 2;
-                send_event(EVENT_BLE_PAIRING_DISABLED, &evt2, sizeof(evt2));
-                ESP_LOGI(TAG, "Auto-disabled pairing");
+                // Pairing finished: auto-disable pin. ble_disable_pairing()
+                // clears the flag, emits PAIRING_DISABLED, and re-advertises
+                // as non-discoverable so no new devices can find/pair.
+                ESP_LOGI(TAG, "Auto-disabling pairing after successful bond");
+                ble_disable_pairing();
             }
         }
         else
@@ -413,6 +431,8 @@ void ble_enable_pairing(uint16_t cmd_id, uint32_t timeout_s)
     memcpy(evt.pin_code, ble_pairing_pin, 6);
     evt.timeout_s = timeout_s;
     send_event(EVENT_BLE_PAIRING_ENABLED, &evt, sizeof(evt));
+    // Switch advertising to discoverable mode so new devices can pair.
+    ble_restart_advertising();
 }
 
 void ble_disable_pairing(void)
@@ -424,6 +444,9 @@ void ble_disable_pairing(void)
     event_ble_pairing_disabled_t evt = {0};
     evt.reason = reason;
     send_event(EVENT_BLE_PAIRING_DISABLED, &evt, sizeof(evt));
+    // Switch advertising back to non-discoverable: new devices can no
+    // longer find the device; already-paired devices can still reconnect.
+    ble_restart_advertising();
 }
 
 void ble_get_peers_list(ble_peer_t *peers, int *peer_count)

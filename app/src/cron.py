@@ -5,7 +5,7 @@ Each field supports `*`, `*/n`, `a`, `a,b,c`, and `a-b`.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 
@@ -48,6 +48,7 @@ def _parse_field(raw: str, minimum: int, maximum: int) -> set[int]:
 @dataclass(frozen=True, slots=True)
 class CronExpr:
     expression: str
+    _parsed: tuple[set[int], ...] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         fields = self.expression.split()

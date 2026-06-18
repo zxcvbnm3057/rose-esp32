@@ -13,10 +13,10 @@ class AcRoomBinding:
 
 
 ROOM_BINDINGS: dict[str, AcRoomBinding] = {
-    "living_room": AcRoomBinding(
-        gpio=4,
-    ),
+    # "living_room": AcRoomBinding(
+    #     gpio=5,
+    # ),
     "bedroom": AcRoomBinding(
-        gpio=5,
+        gpio=4,
     ),
 }

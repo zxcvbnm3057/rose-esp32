@@ -39,7 +39,9 @@ ENABLED = True
 FEATURE = FeatureSpec(
     name="demo_feature",
     enabled=ENABLED,
-    handler=handle,
+    subscriptions=[
+        EventSubscription("uart_rx", DeliveryMode.QUEUE, handler=handle),
+    ],
 )
 ```
 
@@ -85,9 +87,8 @@ FEATURE = FeatureSpec(
     name="demo_feature",
     enabled=ENABLED,
     subscriptions=[
-        EventSubscription("uart_rx", DeliveryMode.QUEUE),
+        EventSubscription("uart_rx", DeliveryMode.QUEUE, handler=handle),
     ],
-    handler=handle,
 )
 ```
 
@@ -108,14 +109,16 @@ app/src/features/my_feature/
 
 ```python
 from .handlers import handle
-from app.src.models import FeatureSpec
+from app.src.models import DeliveryMode, EventSubscription, FeatureSpec
 
 ENABLED = True
 
 FEATURE = FeatureSpec(
     name="my_feature",
     enabled=ENABLED,
-    handler=handle,
+    subscriptions=[
+        EventSubscription("uart_rx", DeliveryMode.QUEUE, handler=handle),
+    ],
 )
 ```
 
@@ -202,6 +205,38 @@ async def handle(context: FeatureContext) -> None:
 - `context.platform`：统一 platform SDK
 - `context.scheduler`：调度器
 - `context.feature_name`：当前功能名
+
+### 每个订阅必须声明 handler
+
+`FeatureSpec` 没有「兜底 handler」，每个 `EventSubscription` 都必须通过
+`handler=` 显式声明自己的处理器。这样一个 feature 可以为不同事件执行不同逻辑，
+事件与处理器的对应关系一目了然：
+
+```python
+FEATURE = FeatureSpec(
+    name="home_presence",
+    subscriptions=[
+        EventSubscription.platform("ble_peer_connected", handler=handle_peer_connected),
+        EventSubscription.platform("ble_peer_disconnected", handler=handle_peer_disconnected),
+        EventSubscription.platform("ble_peers_list", handler=handle_peers_list),
+    ],
+)
+```
+
+如果多个事件共用同一段逻辑，显式指向同一个函数即可：
+
+```python
+subscriptions=[
+    EventSubscription.internal("home.away", handler=handle_home),
+    EventSubscription.internal("home.arrive", handler=handle_home),
+]
+```
+
+约束：
+
+- 任一订阅缺少 `handler` 都会在注册（甚至构造 `FeatureSpec`）时直接报错
+- 同一 feature 的多个 handler 由调度器串行执行（共享一个 worker），
+  因此读写 feature 内部状态时无需额外加锁
 
 如果需要在 feature 内发布内部事件，可以使用：
 

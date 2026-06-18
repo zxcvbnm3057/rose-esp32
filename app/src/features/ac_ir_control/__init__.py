@@ -99,22 +99,28 @@ async def handle(context: FeatureContext) -> None:
     if binding.protocol != "tcl":
         raise ValueError(f"Unsupported AC protocol: {binding.protocol}")
 
-    signal, carrier_hz, duty_cycle = encode_tcl_ir_signal(
-        TclState(
-            power=request.power,
-            mode=request.mode,
-            temperature_c=request.temperature_c,
-            fan=request.fan,
-            swing_vertical=request.swing_vertical,
-            swing_horizontal=request.swing_horizontal,
-            econo=request.econo,
-            health=request.health,
-            turbo=request.turbo,
-            light=request.light,
-            timer_minutes=request.timer_minutes,
-            aux_heat=request.aux_heat,
-        )
+    state = TclState(
+        power=request.power,
+        mode=request.mode,
+        temperature_c=request.temperature_c,
+        fan=request.fan,
+        swing_vertical=request.swing_vertical,
+        swing_horizontal=request.swing_horizontal,
+        econo=request.econo,
+        health=request.health,
+        turbo=request.turbo,
+        light=request.light,
+        timer_minutes=request.timer_minutes,
+        aux_heat=request.aux_heat,
     )
+    await _send_state(context, request.room.value, state)
+
+
+async def _send_state(context: FeatureContext, room: str, state: TclState) -> None:
+    binding = ROOM_BINDINGS[room]
+    if binding.protocol != "tcl":
+        raise ValueError(f"Unsupported AC protocol: {binding.protocol}")
+    signal, carrier_hz, duty_cycle = encode_tcl_ir_signal(state)
     result = await context.platform.signal_tx(
         binding.gpio,
         signal,
@@ -123,15 +129,27 @@ async def handle(context: FeatureContext) -> None:
     )
     logger.info(
         "ac ir state sent room=%s gpio=%s protocol=%s power=%s mode=%s temp=%.1f fan=%s result=%s",
-        request.room.value,
+        room,
         binding.gpio,
         binding.protocol,
-        request.power.value,
-        request.mode.value,
-        request.temperature_c,
-        request.fan.value,
+        state.power.value,
+        state.mode.value,
+        state.temperature_c,
+        state.fan.value,
         result,
     )
+
+
+async def handle_home_away(context: FeatureContext) -> None:
+    """离家：关闭所有房间的空调。"""
+    logger.info("ac: home away -> turning off all air conditioners")
+    off_state = TclState(
+        power=TclPowerState.OFF,
+        mode=TclHvacMode.COOL,
+        temperature_c=26.0,
+    )
+    for room in ROOM_BINDINGS:
+        await _send_state(context, room, off_state)
 
 
 FEATURE = FeatureSpec(
@@ -143,7 +161,12 @@ FEATURE = FeatureSpec(
             request_model=AcIrControlRequest,
             delivery_mode=DeliveryMode.QUEUE,
             description="Send a raw IR air-conditioner command by room binding and command name.",
+            handler=handle,
+        ),
+        EventSubscription.internal(
+            "home.away",
+            DeliveryMode.QUEUE,
+            handler=handle_home_away,
         ),
     ],
-    handler=handle,
 )

@@ -14,10 +14,13 @@ def test_discover_features_supports_file_and_package_modules() -> None:
     package_dir.mkdir(exist_ok=True)
     init_file = package_dir / "__init__.py"
     init_file.write_text(
-        "from app.src.models import FeatureSpec\n"
+        "from app.src.models import DeliveryMode, EventSource, EventSubscription, FeatureSpec\n"
         "async def handle(context):\n"
         "    return None\n"
-        "FEATURE = FeatureSpec(name='loader_test_pkg', handler=handle)\n",
+        "FEATURE = FeatureSpec(\n"
+        "    name='loader_test_pkg',\n"
+        "    subscriptions=[EventSubscription('evt', source=EventSource.INTERNAL, handler=handle)],\n"
+        ")\n",
         encoding="utf-8",
     )
     try:

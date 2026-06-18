@@ -40,6 +40,7 @@ class EventSubscription:
     path: str | None = None
     request_model: type[BaseModel] | None = None
     description: str = ""
+    handler: "FeatureHandler | None" = None
 
     def __post_init__(self) -> None:
         if self.source == EventSource.TIMER and not self.cron:
@@ -55,16 +56,30 @@ class EventSubscription:
         cls,
         event_type: str,
         delivery_mode: DeliveryMode = DeliveryMode.DEDUPE,
+        *,
+        handler: "FeatureHandler | None" = None,
     ) -> EventSubscription:
-        return cls(event_type=event_type, source=EventSource.PLATFORM_WS, delivery_mode=delivery_mode)
+        return cls(
+            event_type=event_type,
+            source=EventSource.PLATFORM_WS,
+            delivery_mode=delivery_mode,
+            handler=handler,
+        )
 
     @classmethod
     def internal(
         cls,
         event_type: str,
         delivery_mode: DeliveryMode = DeliveryMode.DEDUPE,
+        *,
+        handler: "FeatureHandler | None" = None,
     ) -> EventSubscription:
-        return cls(event_type=event_type, source=EventSource.INTERNAL, delivery_mode=delivery_mode)
+        return cls(
+            event_type=event_type,
+            source=EventSource.INTERNAL,
+            delivery_mode=delivery_mode,
+            handler=handler,
+        )
 
     @classmethod
     def timer(
@@ -75,6 +90,7 @@ class EventSubscription:
         delivery_mode: DeliveryMode = DeliveryMode.DEDUPE,
         payload: dict[str, Any] | None = None,
         description: str = "",
+        handler: "FeatureHandler | None" = None,
     ) -> EventSubscription:
         return cls(
             event_type=event_type,
@@ -83,6 +99,7 @@ class EventSubscription:
             payload=payload or {},
             cron=cron,
             description=description,
+            handler=handler,
         )
 
     @classmethod
@@ -94,6 +111,7 @@ class EventSubscription:
         event_type: str | None = None,
         delivery_mode: DeliveryMode = DeliveryMode.QUEUE,
         description: str = "",
+        handler: "FeatureHandler | None" = None,
     ) -> EventSubscription:
         normalized = path.strip("/").replace("/", ".") or "root"
         return cls(
@@ -103,6 +121,7 @@ class EventSubscription:
             path=path,
             request_model=request_model,
             description=description,
+            handler=handler,
         )
 
 
@@ -131,6 +150,13 @@ FeatureHandler = Callable[[FeatureContext], Awaitable[None]]
 @dataclass(slots=True)
 class FeatureSpec:
     name: str
-    handler: FeatureHandler
     enabled: bool = True
     subscriptions: list[EventSubscription] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        missing = [sub.event_type for sub in self.subscriptions if sub.handler is None]
+        if missing:
+            raise ValueError(
+                f"feature '{self.name}' must declare a handler on every subscription; "
+                f"missing for: {', '.join(missing)}"
+            )

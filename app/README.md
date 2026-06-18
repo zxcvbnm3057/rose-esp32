@@ -32,9 +32,11 @@
 ## 启动
 
 ```bash
-cd app
-..\.conda\python.exe -m uvicorn app.src.main:app --host 0.0.0.0 --port 9000 --reload
+# 在仓库根目录执行
+.\.conda\python.exe -m uvicorn app.src.main:app --host 0.0.0.0 --port 9000 --reload --reload-dir app/src/features
 ```
+
+`--reload-dir app/src/features` 把热重载监听范围限定在功能目录，避免改动 bridge / platform 等其它代码时误触发 app 重启。
 
 ## HTTP 入口
 

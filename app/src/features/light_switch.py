@@ -6,6 +6,9 @@
     - `room`: `living_room` | `bedroom`
     - `action`: `on` | `off`
 - 收到请求后，向 UART1 发送预定义灯控指令
+- 订阅家居在场事件：
+    - `home.away`  ：关闭所有房间灯光
+    - `home.arrive`：打开客厅灯光
 
 调用示例：
 POST /app/lights/switch
@@ -70,15 +73,32 @@ LIGHT_COMMANDS_BASE64: dict[RoomName, dict[SwitchAction, str]] = {
 
 async def handle(context: FeatureContext) -> None:
     request = LightSwitchRequest.model_validate(context.activation.payload)
-    data_base64 = LIGHT_COMMANDS_BASE64[request.room][request.action]
+    await _switch_light(context, request.room, request.action)
+
+
+async def _switch_light(context: FeatureContext, room: RoomName, action: SwitchAction) -> None:
+    data_base64 = LIGHT_COMMANDS_BASE64[room][action]
     result = await context.platform.uart_send(UART_ID, data_base64=data_base64)
     logger.info(
         "light switch sent room=%s action=%s uart=%s result=%s",
-        request.room.value,
-        request.action.value,
+        room.value,
+        action.value,
         UART_ID,
         result,
     )
+
+
+async def handle_home_away(context: FeatureContext) -> None:
+    """离家：关闭所有房间灯光。"""
+    logger.info("light: home away -> turning off all lights")
+    for room in RoomName:
+        await _switch_light(context, room, SwitchAction.OFF)
+
+
+async def handle_home_arrive(context: FeatureContext) -> None:
+    """回家：打开客厅灯光。"""
+    logger.info("light: home arrive -> turning on living room light")
+    await _switch_light(context, RoomName.LIVING_ROOM, SwitchAction.ON)
 
 
 FEATURE = FeatureSpec(
@@ -90,7 +110,17 @@ FEATURE = FeatureSpec(
             request_model=LightSwitchRequest,
             delivery_mode=DeliveryMode.QUEUE,
             description="Switch living room or bedroom light via UART1.",
+            handler=handle,
+        ),
+        EventSubscription.internal(
+            "home.away",
+            DeliveryMode.QUEUE,
+            handler=handle_home_away,
+        ),
+        EventSubscription.internal(
+            "home.arrive",
+            DeliveryMode.QUEUE,
+            handler=handle_home_arrive,
         ),
     ],
-    handler=handle,
 )
