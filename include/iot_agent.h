@@ -67,13 +67,17 @@
 #define EVENT_HEARTBEAT 0xFD
 
 // Error codes propagated to host via EVENT_ERROR
-#define IOT_ERR_INVALID_ARG 1
-#define IOT_ERR_INVALID_STATE 2
-#define IOT_ERR_DRIVER 3
-#define IOT_ERR_RESOURCE_CONFLICT 4
-#define IOT_ERR_UNSUPPORTED 5
-#define IOT_ERR_NOT_FOUND 6
-#define IOT_ERR_RESOURCE_EXHAUSTED 7
+#define IOT_ERR_INVALID_ARG 1        // 参数非法 (越界、超出取值范围)
+#define IOT_ERR_INVALID_STATE 2      // 通用状态错误 (保留: 不属于下列细分类的状态问题)
+#define IOT_ERR_DRIVER 3             // 底层驱动调用失败
+#define IOT_ERR_RESOURCE_CONFLICT 4  // 资源已被占用 (bind 冲突)
+#define IOT_ERR_UNSUPPORTED 5        // 硬件/固件不支持该操作
+#define IOT_ERR_NOT_FOUND 6          // 目标不存在 (设备/资源未找到)
+#define IOT_ERR_RESOURCE_EXHAUSTED 7 // 资源耗尽 (队列满、通道用尽)
+#define IOT_ERR_WRONG_MODE 8         // 引脚/资源模式不匹配 (要求特定 mode)
+#define IOT_ERR_NOT_BOUND 9          // 资源未绑定/未配置
+#define IOT_ERR_NO_MEM 10            // 内存分配失败
+#define IOT_ERR_UNKNOWN_CMD 0xFF     // 未知命令 opcode
 
 // GPIO modes
 #define IOT_GPIO_MODE_INPUT 0
@@ -81,6 +85,7 @@
 #define IOT_GPIO_MODE_INTERRUPT 2
 #define IOT_GPIO_MODE_ADC 3
 #define IOT_GPIO_MODE_SIGNAL 4
+#define IOT_GPIO_MODE_INPUT_OUTPUT 5
 
 // UART configs
 #define IOT_UART_NUM_MAX 2
@@ -127,6 +132,8 @@ typedef struct
     uint8_t gpio;
     uint16_t signal_len;
     uint32_t delay_us;
+    uint32_t carrier_hz;
+    float duty_cycle;
 } cmd_gpio_signal_tx_t;
 
 typedef struct
@@ -141,6 +148,8 @@ typedef struct
     uint8_t gpio;
     uint16_t tx_len;
     uint32_t delay_us;
+    uint32_t carrier_hz;
+    float duty_cycle;
     uint32_t rx_total_us;
     uint16_t rx_max_edges;
     // tx sequence follows: tx_len * (1B level + 4B duration_us)
@@ -230,8 +239,9 @@ typedef struct
     uint32_t correlation_id;
 } event_cmd_ack_t;
 
-typedef struct
+typedef struct __attribute__((packed))
 {
+    uint16_t cmd_id; // originating host command id (0 if unsolicited)
     uint8_t gpio;
     uint8_t value;
     int64_t timestamp_us;
@@ -244,15 +254,17 @@ typedef struct
     int64_t timestamp_us;
 } event_gpio_edge_t;
 
-typedef struct
+typedef struct __attribute__((packed))
 {
+    uint16_t cmd_id; // originating host command id (0 if unsolicited)
     uint8_t gpio;
     uint16_t value;
     int64_t timestamp_us;
 } event_adc_value_t;
 
-typedef struct
+typedef struct __attribute__((packed))
 {
+    uint16_t cmd_id; // originating host command id (0 if unsolicited)
     uint8_t gpio;
     uint16_t edge_count;
     int64_t timestamp_us;
@@ -323,8 +335,9 @@ typedef struct
     uint8_t payload[0];
 } event_thread_response_t;
 
-typedef struct
+typedef struct __attribute__((packed))
 {
+    uint16_t cmd_id; // originating host command id (0 if unsolicited)
     uint32_t session_version;
     uint16_t pending_cmd_count;
     uint16_t pending_thread_count;
@@ -344,8 +357,9 @@ typedef struct
     uint8_t connection_state;
 } event_heartbeat_t;
 
-typedef struct
+typedef struct __attribute__((packed))
 {
+    uint16_t cmd_id; // originating host command id (0 if unsolicited)
     uint8_t pin_code[6];
     uint32_t timeout_s;
 } event_ble_pairing_enabled_t;
@@ -367,8 +381,9 @@ typedef struct
     uint8_t reason;
 } event_ble_peer_disconnected_t;
 
-typedef struct
+typedef struct __attribute__((packed))
 {
+    uint16_t cmd_id; // originating host command id (0 if unsolicited)
     uint8_t peer_count;
 } event_ble_peers_list_t;
 
@@ -492,6 +507,8 @@ typedef struct
     uint8_t gpio;
     uint16_t signal_len;
     uint32_t delay_us;
+    uint32_t carrier_hz;
+    float duty_cycle;
     uint8_t *signal_data;
     int8_t tx_channel;
     int8_t rx_channel;
@@ -520,7 +537,7 @@ void release_rmt_rx_channel(int8_t channel);
 // BLE functions
 void ble_manager_init(void);
 void ble_rssi_task(void *pvParameters);
-void ble_enable_pairing(uint32_t timeout_s);
+void ble_enable_pairing(uint16_t cmd_id, uint32_t timeout_s);
 void ble_disable_pairing(void);
 void ble_get_peers_list(ble_peer_t *peers, int *peer_count);
 void ble_start_rssi_scan(uint32_t interval_s);

@@ -68,9 +68,16 @@ class CommandDispatcher:
         cmd = CmdAdcSample(gpio, samples)
         return self._send_command(CMD_ADC_SAMPLE, cmd.to_bytes())
 
-    def gpio_signal_tx(self, gpio: int, signal_data: List[Tuple[int, int]], delay_us: int = 0) -> Optional[int]:
+    def gpio_signal_tx(
+        self,
+        gpio: int,
+        signal_data: List[Tuple[int, int]],
+        delay_us: int = 0,
+        carrier_hz: int = 0,
+        duty_cycle: float = 0.5,
+    ) -> Optional[int]:
         """Send GPIO signal sequence."""
-        cmd = CmdGpioSignalTx(gpio, len(signal_data), delay_us, signal_data)
+        cmd = CmdGpioSignalTx(gpio, len(signal_data), delay_us, carrier_hz, duty_cycle, signal_data)
         return self._send_command(CMD_GPIO_SIGNAL_TX, cmd.to_bytes())
 
     def gpio_signal_rx(self, gpio: int, timeout_us: int = 1000000, max_edges: int = 100) -> Optional[int]:
@@ -82,6 +89,8 @@ class CommandDispatcher:
                              gpio: int,
                              tx_signal: List[Tuple[int, int]],
                              delay_us: int = 0,
+                             carrier_hz: int = 0,
+                             duty_cycle: float = 0.5,
                              rx_total_us: int = 1000000,
                              rx_max_edges: int = 100) -> Optional[int]:
         """Exchange GPIO signals (TX then RX).
@@ -89,7 +98,7 @@ class CommandDispatcher:
         The firmware always captures at finest resolution (RMT filter_ticks=1).
         Resolution/glitch-merging is applied in software by the client layer.
         """
-        cmd = CmdGpioSignalExchange(gpio, len(tx_signal), delay_us, rx_total_us, rx_max_edges,
+        cmd = CmdGpioSignalExchange(gpio, len(tx_signal), delay_us, carrier_hz, duty_cycle, rx_total_us, rx_max_edges,
                                     tx_signal)
         return self._send_command(CMD_GPIO_SIGNAL_EXCHANGE, cmd.to_bytes())
 

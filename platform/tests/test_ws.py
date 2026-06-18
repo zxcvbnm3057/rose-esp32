@@ -1,6 +1,7 @@
 """Test WebSocket endpoint — mock (TestClient) and real (websockets to live server)."""
 import os
 import json
+import time
 import pytest
 from fastapi.testclient import TestClient
 
@@ -15,8 +16,8 @@ class _RealWS:
     def __init__(self, ws):
         self._ws = ws
 
-    def receive_json(self) -> dict:
-        return json.loads(self._ws.recv(timeout=15))
+    def receive_json(self, timeout: float = 15) -> dict:
+        return json.loads(self._ws.recv(timeout=timeout))
 
     def send_json(self, data: dict) -> None:
         self._ws.send(json.dumps(data))
@@ -50,7 +51,7 @@ def ws_client():
     if _is_real():
         yield _RealWSClient()
     else:
-        from app.main import app
+        from src.main import app
         with TestClient(app) as c:
             yield c
 
@@ -62,13 +63,14 @@ def _ws_skip_init(ws):
     # Always skip hardware_config + connection_change
     ws.receive_json(); ws.receive_json()
     if _is_real():
-        # Real mode: skip expected_state, device_state (up to 3 more)
-        for _ in range(3):
+        # Real mode may asynchronously emit a larger startup burst:
+        # expected_state/device_state, sync_response, many port_status items,
+        # BLE peers, heartbeat, etc. Drain the burst for a short window so
+        # later assertions read the actual command result instead of startup chatter.
+        deadline = time.time() + 2.0
+        while time.time() < deadline:
             try:
-                msg = ws.receive_json()
-                t = msg.get("type", "")
-                if t not in ("expected_state", "device_state", "gpio_status", "uart_status", "ble_status", "port_status"):
-                    break
+                ws.receive_json(timeout=0.25)
             except Exception:
                 break
 
@@ -95,6 +97,13 @@ def _ws_expect_cmd_result(ws) -> dict:
         if msg.get("type") == "cmd_result":
             return msg
     raise TimeoutError("No cmd_result received")
+
+
+def _assert_ws_not_rejected_by_permissions(resp: dict) -> None:
+    """WS command may fail at runtime on real hardware, but must not be rejected by role/op policy."""
+    err = str(resp.get("error", "")).lower()
+    assert "not allowed" not in err
+    assert "unsupported ws op" not in err
 
 
 def test_ws_connect_and_receive_config(ws_client, mock_bridge):
@@ -167,6 +176,67 @@ def test_ws_role_app_can_read(ws_client, mock_bridge):
         assert "success" in resp
 
 
+def test_ws_role_app_can_signal_tx(ws_client, mock_bridge):
+    with ws_client.websocket_connect("/ws?role=app") as ws:
+        _ws_skip_init(ws)
+        ws.send_json({
+            "type": "cmd", "op": "signal_tx", "gpio": 5,
+            "signal": [{"level": 1, "duration_us": 10}, {"level": 0, "duration_us": 20}],
+            "delay_us": 0,
+        })
+        resp = _ws_expect_cmd_result(ws)
+        assert resp["success"] is True
+        assert resp["data"]["edges_sent"] == 2
+
+
+def test_ws_role_app_can_signal_rx(ws_client, mock_bridge):
+    with ws_client.websocket_connect("/ws?role=app") as ws:
+        _ws_skip_init(ws)
+        ws.send_json({"type": "cmd", "op": "signal_rx", "gpio": 4, "timeout_us": 500000, "max_edges": 100})
+        resp = _ws_expect_cmd_result(ws)
+        assert resp["success"] is True
+        assert "edges" in resp["data"]
+
+
+def test_ws_role_app_can_signal_exchange(ws_client, mock_bridge):
+    with ws_client.websocket_connect("/ws?role=app") as ws:
+        _ws_skip_init(ws)
+        ws.send_json({
+            "type": "cmd", "op": "signal_exchange", "gpio": 5,
+            "tx_signal": [{"level": 1, "duration_us": 10}],
+            "delay_us": 0, "rx_total_us": 500000, "rx_max_edges": 100,
+        })
+        resp = _ws_expect_cmd_result(ws)
+        assert resp["success"] is True
+        assert "edges" in resp["data"]
+
+
+def test_ws_role_app_can_uart_send(ws_client, mock_bridge):
+    with ws_client.websocket_connect("/ws?role=app") as ws:
+        _ws_skip_init(ws)
+        # UART0 is the default log output port — always test on UART1.
+        ws.send_json({"type": "cmd", "op": "uart_send", "uart_id": 1, "data": "hello"})
+        resp = _ws_expect_cmd_result(ws)
+        _assert_ws_not_rejected_by_permissions(resp)
+        if not _is_real():
+            assert resp["success"] is True
+        assert resp["data"]["bytes_sent"] == 5
+
+
+def test_ws_role_app_can_thread_passthrough(ws_client, mock_bridge):
+    with ws_client.websocket_connect("/ws?role=app") as ws:
+        _ws_skip_init(ws)
+        ws.send_json({
+            "type": "cmd", "op": "thread_passthrough",
+            "device_id": 1, "correlation_id": 0, "payload": "AQID",
+        })
+        resp = _ws_expect_cmd_result(ws)
+        _assert_ws_not_rejected_by_permissions(resp)
+        if not _is_real():
+            assert resp["success"] is True
+        assert resp["data"]["device_id"] == 1
+
+
 def test_ws_role_console_can_control(ws_client, mock_bridge):
     with ws_client.websocket_connect("/ws?role=console") as ws:
         _ws_skip_init(ws)
@@ -189,8 +259,8 @@ def test_ws_unregistered_command_rejected_even_for_console(ws_client, mock_bridg
 # ── Event parsing and dispatch (unit) ─────────────────────
 
 def test_event_to_dict_gpio_status():
-    from app.bridge.protocol import EventGpioStatus
-    from app.services.bridge_service import _event_to_dict
+    from src.bridge.protocol import EventGpioStatus
+    from src.services.bridge_service import _event_to_dict
     evt = EventGpioStatus(gpio=5, mode=1, pull=0, edge=1, value=1, in_use=1, owner=0, adc_raw=0, adc_mv=0)
     d = _event_to_dict("gpio_status", evt)
     assert d["gpio"] == 5
@@ -200,8 +270,8 @@ def test_event_to_dict_gpio_status():
     assert d["edge"] == 1
 
 def test_event_to_dict_uart_status():
-    from app.bridge.protocol import EventUartStatus
-    from app.services.bridge_service import _event_to_dict
+    from src.bridge.protocol import EventUartStatus
+    from src.services.bridge_service import _event_to_dict
     evt = EventUartStatus(uart_id=0, baudrate=115200, data_bits=8, parity=0, stop_bits=1, tx_gpio=1, rx_gpio=3, in_use=1, owner=0)
     d = _event_to_dict("uart_status", evt)
     assert d["uart_id"] == 0
@@ -211,8 +281,8 @@ def test_event_to_dict_uart_status():
     assert d["parity"] == 0
 
 def test_event_to_dict_ble_status():
-    from app.bridge.protocol import EventBleStatus
-    from app.services.bridge_service import _event_to_dict
+    from src.bridge.protocol import EventBleStatus
+    from src.services.bridge_service import _event_to_dict
     evt = EventBleStatus(pairing_enabled=1, scan_enabled=0, peer_count=2, pairing_timeout_s=60)
     d = _event_to_dict("ble_status", evt)
     assert d["pairing_enabled"] == 1
@@ -222,9 +292,9 @@ def test_event_to_dict_ble_status():
 
 
 def test_event_to_dict_ble_peers_list():
-    from app.bridge.protocol import EventBlePeersList
-    from app.services.bridge_service import _event_to_dict
-    evt = EventBlePeersList(peer_count=1, peers=[(b'\xaa\xbb\xcc\xdd\xee\xff', -45)])
+    from src.bridge.protocol import EventBlePeersList
+    from src.services.bridge_service import _event_to_dict
+    evt = EventBlePeersList(cmd_id=0, peer_count=1, peers=[(b'\xaa\xbb\xcc\xdd\xee\xff', -45)])
     d = _event_to_dict("ble_peers_list", evt)
     assert d["peer_count"] == 1
     assert len(d["peers"]) == 1
@@ -233,8 +303,8 @@ def test_event_to_dict_ble_peers_list():
 
 
 def test_event_to_dict_ble_peer_connected():
-    from app.bridge.protocol import EventBlePeerConnected
-    from app.services.bridge_service import _event_to_dict
+    from src.bridge.protocol import EventBlePeerConnected
+    from src.services.bridge_service import _event_to_dict
     evt = EventBlePeerConnected(peer_mac=b'\x11\x22\x33\x44\x55\x66', rssi=-50)
     d = _event_to_dict("ble_peer_connected", evt)
     assert "mac" in d
@@ -242,8 +312,8 @@ def test_event_to_dict_ble_peer_connected():
 
 
 def test_event_to_dict_ble_peer_disconnected():
-    from app.bridge.protocol import EventBlePeerDisconnected
-    from app.services.bridge_service import _event_to_dict
+    from src.bridge.protocol import EventBlePeerDisconnected
+    from src.services.bridge_service import _event_to_dict
     evt = EventBlePeerDisconnected(peer_mac=b'\xff\xee\xdd\xcc\xbb\xaa', reason=1)
     d = _event_to_dict("ble_peer_disconnected", evt)
     assert "mac" in d
@@ -251,8 +321,8 @@ def test_event_to_dict_ble_peer_disconnected():
 
 
 def test_event_to_dict_ble_rssi():
-    from app.bridge.protocol import EventBleRssi
-    from app.services.bridge_service import _event_to_dict
+    from src.bridge.protocol import EventBleRssi
+    from src.services.bridge_service import _event_to_dict
     evt = EventBleRssi(peer_mac=b'\xaa\xbb\xcc\xdd\xee\xff', rssi=-67, timestamp_us=12345)
     d = _event_to_dict("ble_rssi", evt)
     assert "mac" in d
@@ -260,17 +330,17 @@ def test_event_to_dict_ble_rssi():
 
 
 def test_event_to_dict_ble_pairing_enabled():
-    from app.bridge.protocol import EventBlePairingEnabled
-    from app.services.bridge_service import _event_to_dict
-    evt = EventBlePairingEnabled(pin_code=b'654321', timeout_s=30)
+    from src.bridge.protocol import EventBlePairingEnabled
+    from src.services.bridge_service import _event_to_dict
+    evt = EventBlePairingEnabled(cmd_id=0, pin_code=b'654321', timeout_s=30)
     d = _event_to_dict("ble_pairing_enabled", evt)
     assert "pin_code" in d
     assert d["timeout_s"] == 30
 
 
 def test_event_to_dict_ble_pairing_disabled():
-    from app.bridge.protocol import EventBlePairingDisabled
-    from app.services.bridge_service import _event_to_dict
+    from src.bridge.protocol import EventBlePairingDisabled
+    from src.services.bridge_service import _event_to_dict
     evt = EventBlePairingDisabled(reason=2)
     d = _event_to_dict("ble_pairing_disabled", evt)
     assert d["reason"] == 2

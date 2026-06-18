@@ -31,7 +31,7 @@ export function WaveformPanel() {
   const toggleMonitoredPin = useDeviceStore((s) => s.toggleMonitoredPin);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const edgeEventsRef = useRef(edgeEvents);
   edgeEventsRef.current = edgeEvents;
   const pinStatesRef = useRef(pinStates);

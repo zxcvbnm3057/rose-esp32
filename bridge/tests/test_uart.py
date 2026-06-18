@@ -99,3 +99,11 @@ class TestUartLoopback:
         """UART config on invalid ID should fail."""
         listener = client.configure_uart(99, 9600, tx_gpio=9, rx_gpio=10)
         assert listener is None, "Config on invalid UART ID should return None"
+
+    def test_uart_send_rejects_unbound_uart(self, client):
+        """UART send must fail if the UART has not been configured/bound."""
+        assert client.send_uart(UART_ID, b"hello") is False
+
+    def test_uart_read_rejects_unbound_uart(self, client):
+        """UART read must fail if the UART has not been configured/bound."""
+        assert client.read_uart(UART_ID, 32) is None

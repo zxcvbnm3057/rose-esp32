@@ -32,6 +32,9 @@ export function getPinColors(
         case 'OUTPUT':
             if (state.value === 1) return { border: '#22c55e', fill: '#14532d', text: '#86efac' };
             return { border: '#6b7280', fill: '#374151', text: '#9ca3af' };
+        case 'INPUT_OUTPUT':
+            if (state.value === 1) return { border: '#10b981', fill: '#064e3b', text: '#a7f3d0' };
+            return { border: '#14b8a6', fill: '#134e4a', text: '#99f6e4' };
         case 'INTERRUPT':
             return { border: '#eab308', fill: '#422006', text: '#fde047' };
         case 'ADC':
@@ -47,6 +50,7 @@ export function getModeLabel(mode?: string): string {
     switch (mode) {
         case 'INPUT': return 'IN';
         case 'OUTPUT': return 'OUT';
+        case 'INPUT_OUTPUT': return 'IO';
         case 'INTERRUPT': return 'INT';
         case 'ADC': return 'ADC';
         case 'SIGNAL': return 'SIG';

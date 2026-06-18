@@ -9,6 +9,24 @@ import os
 import pytest
 
 
+HARDWARE_TEST_FILES = {
+    "test_adc.py",
+    "test_basic.py",
+    "test_ble.py",
+    "test_ble_events.py",
+    "test_edge.py",
+    "test_gpio.py",
+    "test_integration.py",
+    "test_nvs.py",
+    "test_port_status.py",
+    "test_reconnect.py",
+    "test_signal.py",
+    "test_sync.py",
+    "test_thread.py",
+    "test_uart.py",
+}
+
+
 def pytest_configure(config):
     config.addinivalue_line("markers", "hardware: test requires real ESP32")
 
@@ -17,7 +35,7 @@ def pytest_collection_modifyitems(config, items):
     if os.environ.get("USE_REAL_DEVICE") != "1":
         skip_hw = pytest.mark.skip(reason="USE_REAL_DEVICE not set")
         for item in items:
-            if "hardware" in item.keywords:
+            if "hardware" in item.keywords or item.fspath.basename in HARDWARE_TEST_FILES:
                 item.add_marker(skip_hw)
 
 

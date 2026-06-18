@@ -13,6 +13,7 @@ from ..src import (
     IoTAgentClient,
     GPIO_MODE_INPUT,
     GPIO_MODE_OUTPUT,
+    RESOURCE_GPIO,
     GPIO_MODE_INTERRUPT,
     GPIO_MODE_ADC,
     EVENT_GPIO_EDGE,
@@ -105,6 +106,22 @@ class TestGPIOOperations:
         # Set alternating pattern
         for i, pin in enumerate(pins):
             assert client.set_gpio(pin, i % 2)
+
+    def test_gpio_set_rejects_unbound_pin(self, client):
+        """GPIO set must fail for an unbound GPIO."""
+        gpio_pin = 5
+        cmd_id = client.commands.port_unbind(RESOURCE_GPIO, gpio_pin)
+        assert cmd_id is not None
+        client.events.wait_for_response(cmd_id, timeout=2.0)
+
+        assert client.set_gpio(gpio_pin, 1) is False
+
+    def test_gpio_set_rejects_uart_bound_pin(self, client):
+        """GPIO set must fail when the GPIO is currently occupied by UART TX/RX."""
+        listener = client.configure_uart(1, 115200, tx_gpio=1, rx_gpio=3)
+        assert listener is not None
+        assert client.set_gpio(1, 1) is False
+        assert client.set_gpio(3, 1) is False
 
 
 class TestGPIOInterruptOperations:

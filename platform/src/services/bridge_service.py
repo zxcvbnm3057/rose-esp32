@@ -171,6 +171,16 @@ def is_connected() -> bool:
     return get_client().is_connected()
 
 
+def get_last_error() -> Optional[int]:
+    """Return the firmware error code (IOT_ERR_*) from the last failed command.
+
+    None means "unknown" (e.g. timeout / no response). Set by the bridge
+    client whenever an ACK-based command fails; lets the API surface a
+    precise reason instead of a generic message.
+    """
+    return getattr(get_client(), "last_error", None)
+
+
 def _run_sync(func, *args, **kwargs):
     """Run a synchronous bridge method in thread pool."""
     return asyncio.get_running_loop().run_in_executor(_executor, func, *args, **kwargs)
@@ -194,9 +204,15 @@ async def adc_sample(gpio: int, samples: int = 1) -> Optional[int]:
     return await _run_sync(get_client().read_adc, gpio, samples)
 
 
-async def signal_tx(gpio: int, signal: list, delay_us: int = 0) -> bool:
+async def signal_tx(
+    gpio: int,
+    signal: list,
+    delay_us: int = 0,
+    carrier_hz: int = 0,
+    duty_cycle: float = 0.5,
+) -> bool:
     tx = [(s["level"], s["duration_us"]) for s in signal]
-    return await _run_sync(get_client().send_signal, gpio, tx, delay_us)
+    return await _run_sync(get_client().send_signal, gpio, tx, delay_us, carrier_hz, duty_cycle)
 
 
 async def signal_rx(gpio: int, timeout_us: int, max_edges: int,
@@ -208,13 +224,15 @@ async def signal_rx(gpio: int, timeout_us: int, max_edges: int,
 
 async def signal_exchange(gpio: int, tx_signal: list, delay_us: int,
                           rx_total_us: int, rx_max_edges: int,
+                          carrier_hz: int = 0,
+                          duty_cycle: float = 0.5,
                           resolution: "int | str | None" = None) -> Optional[list]:
     # Firmware captures at finest resolution; the bridge client applies the
     # requested resolution (preset name or microseconds) in software via
     # glitch-merging.  No clamp here — the client normalizes the value.
     tx = [(s["level"], s["duration_us"]) for s in tx_signal]
     return await _run_sync(get_client().exchange_signals,
-                           gpio, tx, delay_us, rx_total_us, rx_max_edges, resolution)
+                           gpio, tx, delay_us, carrier_hz, duty_cycle, rx_total_us, rx_max_edges, resolution)
 
 
 async def uart_config(uart_id: int, baudrate: int, tx_gpio: int, rx_gpio: int,
@@ -253,17 +271,34 @@ async def port_unbind(resource_type: int, id: int) -> bool:
 
 async def port_status(resource_type: int, id: int) -> Optional[dict]:
     from ..bridge.protocol import EventPortStatus, EVENT_PORT_STATUS
+    get_client().events.discard_events_matching(
+        EVENT_PORT_STATUS,
+        lambda event: isinstance(event, EventPortStatus)
+        and event.resource_type == resource_type
+        and event.id == id,
+    )
     cmd_id = get_client().commands.port_status(resource_type, id)
     if cmd_id is None:
         return None
-    response = get_client().events.wait_for_event(EVENT_PORT_STATUS, timeout=3.0)
+    response = get_client().events.wait_for_event_matching(
+        EVENT_PORT_STATUS,
+        lambda event: isinstance(event, EventPortStatus)
+        and event.resource_type == resource_type
+        and event.id == id,
+        timeout=3.0,
+    )
     if isinstance(response, EventPortStatus):
         return {
             "resource_type": response.resource_type,
             "id": response.id,
             "in_use": response.in_use,
             "mode": getattr(response, "mode", None),
+            "pull": getattr(response, "pull", None),
+            "edge": getattr(response, "edge", None),
             "value": getattr(response, "value", None),
+            "owner": getattr(response, "owner", None),
+            "adc_raw": getattr(response, "adc_raw", None),
+            "adc_mv": getattr(response, "adc_mv", None),
         }
     return None
 

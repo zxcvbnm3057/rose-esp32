@@ -32,7 +32,8 @@ def test_parse_ble_status():
     handler = EventHandler()
     # Use a simple known event type to verify handler pipeline works
     pin = b'\x01\x02\x03\x04\x05\x06'
-    payload = pin + struct.pack('<I', 60)  # 6B PIN + 4B timeout
+    # Layout (packed): cmd_id(H) pin(6) timeout(I)
+    payload = struct.pack('<H', 0) + pin + struct.pack('<I', 60)
     frame = _make_frame(EVENT_BLE_PAIRING_ENABLED, payload)
     handler.handle_event(frame)
     # Should not raise; events stored in pending_events
@@ -46,7 +47,8 @@ def test_parse_ble_peers_list():
     rssi1 = struct.pack('<b', -45)
     mac2 = b'\x11\x22\x33\x44\x55\x66'
     rssi2 = struct.pack('<b', -72)
-    payload = b'\x02' + mac1 + rssi1 + mac2 + rssi2  # peer_count=2
+    # Layout (packed): cmd_id(H) peer_count(B) then peers
+    payload = struct.pack('<H', 0) + b'\x02' + mac1 + rssi1 + mac2 + rssi2  # peer_count=2
     frame = _make_frame(EVENT_BLE_PEERS_LIST, payload)
     handler.handle_event(frame)
     assert EVENT_BLE_PEERS_LIST in handler.pending_events
@@ -88,7 +90,8 @@ def test_parse_ble_pairing_enabled():
     handler = EventHandler()
     pin = b'\x01\x02\x03\x04\x05\x06'
     timeout = struct.pack('<I', 60)
-    frame = _make_frame(EVENT_BLE_PAIRING_ENABLED, pin + timeout)
+    # Layout (packed): cmd_id(H) pin(6) timeout(I)
+    frame = _make_frame(EVENT_BLE_PAIRING_ENABLED, struct.pack('<H', 0) + pin + timeout)
     handler.handle_event(frame)
     assert EVENT_BLE_PAIRING_ENABLED in handler.pending_events
 

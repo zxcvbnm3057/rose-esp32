@@ -127,13 +127,15 @@ def test_adc_sample_layout():
 
 def test_signal_tx_layout():
     edges = [(1, 100), (0, 200), (1, 150)]
-    cmd = CmdGpioSignalTx(gpio=5, signal_len=len(edges), delay_us=50, signal_data=edges)
+    cmd = CmdGpioSignalTx(gpio=5, signal_len=len(edges), delay_us=50, carrier_hz=38000, duty_cycle=0.33, signal_data=edges)
     data = cmd.to_bytes()
-    # header: B gpio + H signal_len + I delay_us = 7 bytes, then 5 bytes/edge
-    assert data[:7] == struct.pack('<BHI', 5, 3, 50)
-    assert len(data) == 7 + 3 * 5
+    # header: B gpio + H signal_len + I delay_us + I carrier_hz + f duty_cycle = 15 bytes, then 5 bytes/edge
+    gpio, signal_len, delay_us, carrier_hz, duty_cycle = struct.unpack('<BHIIf', data[:15])
+    assert (gpio, signal_len, delay_us, carrier_hz) == (5, 3, 50, 38000)
+    assert duty_cycle == pytest.approx(0.33, rel=1e-6)
+    assert len(data) == 15 + 3 * 5
     # verify first edge
-    level, dur = struct.unpack('<BI', data[7:12])
+    level, dur = struct.unpack('<BI', data[15:20])
     assert (level, dur) == (1, 100)
 
 
@@ -147,24 +149,24 @@ def test_signal_rx_layout():
 def test_signal_exchange_layout():
     edges = [(1, 100), (0, 200)]
     cmd = CmdGpioSignalExchange(
-        gpio=5, tx_len=len(edges), delay_us=50,
+        gpio=5, tx_len=len(edges), delay_us=50, carrier_hz=38000, duty_cycle=0.33,
         rx_total_us=1_000_000, rx_max_edges=100,
         tx_signal_data=edges)
     data = cmd.to_bytes()
-    # header BHIIH = 1+2+4+4+2 = 13 bytes (resolution removed from the wire;
-    # it's now a software-only concept in the bridge client).
-    head = struct.pack('<BHIIH', 5, 2, 50, 1_000_000, 100)
-    assert data[:13] == head
-    assert len(data) == 13 + 2 * 5
+    # header BHIfIH = 1+2+4+4+4+4+2 = 21 bytes.
+    gpio, tx_len, delay_us, carrier_hz, duty_cycle, rx_total_us, rx_max_edges = struct.unpack('<BHIIfIH', data[:21])
+    assert (gpio, tx_len, delay_us, carrier_hz, rx_total_us, rx_max_edges) == (5, 2, 50, 38000, 1_000_000, 100)
+    assert duty_cycle == pytest.approx(0.33, rel=1e-6)
+    assert len(data) == 21 + 2 * 5
 
 
 def test_signal_exchange_empty_tx():
     cmd = CmdGpioSignalExchange(
-        gpio=5, tx_len=0, delay_us=0,
+        gpio=5, tx_len=0, delay_us=0, carrier_hz=0, duty_cycle=0.5,
         rx_total_us=500, rx_max_edges=10,
         tx_signal_data=[])
     data = cmd.to_bytes()
-    assert len(data) == 13
+    assert len(data) == 21
 
 
 def test_gpio_signal_exchange_frame_has_no_resolution():
@@ -190,10 +192,11 @@ def test_gpio_signal_exchange_frame_has_no_resolution():
     assert cmd_id is not None
     payload = server.last_frame.payload
     assert payload[0] == CMD_GPIO_SIGNAL_EXCHANGE
-    # opcode(1) + header(13) + 2 edges * 5 bytes = 24 bytes total.
-    assert len(payload) == 1 + 13 + 2 * 5
-    _gpio, _txlen, _delay, _rxtot, _rxedges = struct.unpack('<BHIIH', payload[1:14])
-    assert _gpio == 5 and _txlen == 2 and _rxtot == 1_000_000
+    # opcode(1) + header(21) + 2 edges * 5 bytes = 32 bytes total.
+    assert len(payload) == 1 + 21 + 2 * 5
+    _gpio, _txlen, _delay, _carrier_hz, _duty_cycle, _rxtot, _rxedges = struct.unpack('<BHIIfIH', payload[1:22])
+    assert _gpio == 5 and _txlen == 2 and _rxtot == 1_000_000 and _carrier_hz == 0
+    assert _duty_cycle == pytest.approx(0.5, rel=1e-6)
 
 
 # ── UART commands ───────────────────────────────────────────────────────

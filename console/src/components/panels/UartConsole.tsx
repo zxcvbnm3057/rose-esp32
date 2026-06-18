@@ -24,6 +24,7 @@ export function UartConsole() {
   const [selectedUart, setSelectedUart] = useState<number | null>(null);
   const [hexMode, setHexMode] = useState(true);
   const [displayHex, setDisplayHex] = useState(true);
+  const [collapsed, setCollapsed] = useState(true);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -71,13 +72,17 @@ export function UartConsole() {
   if (boundIds.length === 0) return null;
 
   return (
-    <div className="border-t border-gray-700 bg-gray-950 flex flex-col" style={{ height: 200 }}>
+    <div className="border-t border-gray-700 bg-gray-950 flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-800 bg-gray-900 shrink-0">
-        <span className="text-gray-400 text-xs font-medium flex items-center gap-2">
+        <button
+          onClick={() => setCollapsed(!collapsed)}
+          className="text-gray-400 text-xs font-medium flex items-center gap-2"
+        >
           <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
           UART Monitor
-        </span>
+          <span className="text-gray-600">{collapsed ? '▶' : '▼'}</span>
+        </button>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setDisplayHex(!displayHex)}
@@ -95,8 +100,10 @@ export function UartConsole() {
         </div>
       </div>
 
+      {!collapsed && (
+        <>
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-1 font-mono text-xs leading-5">
+      <div ref={scrollRef} className="overflow-y-auto px-3 py-1 font-mono text-xs leading-5" style={{ height: 140 }}>
         {uartMessages.length === 0 && (
           <div className="text-gray-600 italic">等待 UART 消息…</div>
         )}
@@ -161,6 +168,8 @@ export function UartConsole() {
           Send
         </button>
       </div>
+        </>
+      )}
     </div>
   );
 }

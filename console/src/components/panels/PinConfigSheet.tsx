@@ -3,6 +3,12 @@ import { useDeviceStore, getUartForGpio, getAvailableUartPins } from '../../stor
 import { api } from '../../services/api';
 import type { PinConfig } from '../../types';
 
+function getModeLabel(modeCode: number | null | undefined) {
+  const modes = ['INPUT', 'OUTPUT', 'INTERRUPT', 'ADC', 'SIGNAL', 'INPUT_OUTPUT'] as const;
+  if (modeCode == null || modeCode < 0 || modeCode >= modes.length) return 'UNCONFIGURED';
+  return modes[modeCode];
+}
+
 // ── Types ──────────────────────────────────────────
 
 type PanelMode = 'gpio' | 'uart_setup' | 'uart_active';
@@ -25,6 +31,7 @@ export function PinConfigSheet({ embedded }: Props) {
   const setUartPinPicker = useDeviceStore((s) => s.setUartPinPicker);
   const lockedPins = useDeviceStore((s) => s.lockedPins);
   const toggleLock = useDeviceStore((s) => s.toggleLock);
+  const [isEditingGpioForm, setIsEditingGpioForm] = useState(false);
 
   // ── Determine panel mode ──
   const uartInfo = useMemo(() => {
@@ -35,7 +42,6 @@ export function PinConfigSheet({ embedded }: Props) {
   const pin: PinConfig | undefined = selectedGpio != null
     ? config?.pins.find((p) => p.gpio === selectedGpio)
     : undefined;
-
   // Initial panel mode: if pin is uart-bound → uart_active, else gpio
   const [panelMode, setPanelMode] = useState<PanelMode>('gpio');
 
@@ -55,13 +61,19 @@ export function PinConfigSheet({ embedded }: Props) {
   const [samples, setSamples] = useState(4);
 
   useEffect(() => {
-    if (pin && panelMode === 'gpio') {
+    if (pin && panelMode === 'gpio' && !isEditingGpioForm) {
       setMode(pinState?.mode_code ?? 0);
       setPull(pinState?.pull_code ?? 0);
       setEdge(pinState?.edge ?? 0);
       setOutValue(pinState?.value ?? 0);
     }
-  }, [selectedGpio, pinState, panelMode]);
+  }, [selectedGpio, pinState, panelMode, isEditingGpioForm]);
+
+  useEffect(() => {
+    setGpioReadResult(null);
+    setAdcReadResult(null);
+    setIsEditingGpioForm(false);
+  }, [selectedGpio]);
 
   // ── UART setup state ──
   const [uartId, setUartId] = useState(0);
@@ -72,6 +84,27 @@ export function PinConfigSheet({ embedded }: Props) {
   // ── GPIO status display ──
   const [gpioReadResult, setGpioReadResult] = useState<string | null>(null);
   const [adcReadResult, setAdcReadResult] = useState<string | null>(null);
+
+  const syncPinStateFromStatus = useCallback(async (gpio: number) => {
+    const res = await api.portStatus(0, gpio) as { data: { in_use: number; mode?: number; pull?: number; edge?: number; value?: number } };
+    const d = res.data;
+    const pulls = ['NONE', 'DOWN', 'UP'] as const;
+    const next: Record<string, unknown> = {
+      bound: d.in_use === 1,
+    };
+    if (d.value != null) next.value = d.value;
+    if (d.mode != null) {
+      next.mode = getModeLabel(d.mode);
+      next.mode_code = d.mode;
+    }
+    if (d.pull != null) {
+      next.pull = pulls[d.pull] ?? 'NONE';
+      next.pull_code = d.pull;
+    }
+    if (d.edge != null) next.edge = d.edge;
+    useDeviceStore.getState().updatePin(gpio, next as never);
+    return d;
+  }, []);
 
   // ── UART active state (send/read) ──
   const [uartSendData, setUartSendData] = useState('');
@@ -135,6 +168,9 @@ export function PinConfigSheet({ embedded }: Props) {
 
   const now = () => new Date().toLocaleTimeString();
   const caps = pin.capabilities;
+  const actualModeCode = pinState?.mode_code ?? -1;
+  const actualMode = pinState?.mode ?? 'UNCONFIGURED';
+  const actualOutputReadUnavailable = actualModeCode === 1 || actualMode === 'OUTPUT';
   const maxUartCount = config?.capabilities.uart_count ?? 2;
   const availablePins = getAvailableUartPins(config, uartStates);
   const usedUartIds = new Set(
@@ -148,6 +184,7 @@ export function PinConfigSheet({ embedded }: Props) {
     { v: 2, l: 'INTERRUPT', e: caps.interrupt },
     { v: 3, l: 'ADC', e: caps.adc },
     { v: 4, l: 'SIGNAL', e: caps.signal },
+    { v: 5, l: 'INPUT_OUTPUT', e: caps.input && caps.output },
   ].filter((m) => m.e);
 
   // ── Handlers: GPIO ──
@@ -157,19 +194,10 @@ export function PinConfigSheet({ embedded }: Props) {
       if (mode === 1) {
         await api.gpioSet(pin.gpio, outValue);
       }
-      // Force refresh to update chip immediately
       try {
-        const res = await api.portStatus(0, pin.gpio);
-        const d = (res as { data: { in_use: number; mode?: number; value?: number } }).data;
-        const store = useDeviceStore.getState();
-        const modes = ['INPUT', 'OUTPUT', 'INTERRUPT', 'ADC', 'SIGNAL'] as const;
-        store.updatePin(pin.gpio, {
-          value: d.value ?? null,
-          mode: d.mode != null ? modes[d.mode] ?? 'UNCONFIGURED' : 'UNCONFIGURED',
-          mode_code: d.mode ?? 0,
-          bound: d.in_use === 1,
-        } as never);
+        await syncPinStateFromStatus(pin.gpio);
       } catch { /* best-effort */ }
+      setIsEditingGpioForm(false);
       addHistory({ time: now(), op: `GPIO${pin.gpio} 配置`, result: '✓' });
       selectGpio(null);
     } catch (e: unknown) {
@@ -538,12 +566,28 @@ export function PinConfigSheet({ embedded }: Props) {
                   try {
                     const res = await api.gpioGet(pin.gpio);
                     const v = (res as { data: { value: number } }).data.value;
-                    setGpioReadResult(v === 1 ? 'HIGH' : 'LOW');
-                    if (caps.adc) {
+                    useDeviceStore.getState().updatePin(pin.gpio, { value: v } as never);
+                    const currentModeCode = useDeviceStore.getState().pinStates[pin.gpio]?.mode_code ?? -1;
+                    if (currentModeCode === 1) {
+                      setGpioReadResult('not available');
+                      setAdcReadResult('not available');
+                    } else {
+                      setGpioReadResult(v === 1 ? 'HIGH' : 'LOW');
+                    }
+                    if (caps.adc && currentModeCode === 3) {
                       const ares = await api.gpioAdc(pin.gpio, samples);
                       const av = (ares as { data: { value: number; voltage_mv: number } }).data;
+                      useDeviceStore.getState().updatePin(pin.gpio, {
+                        adc_value: av.value,
+                        adc_voltage_mv: av.voltage_mv,
+                      } as never);
                       setAdcReadResult(`${av.value} / ${av.voltage_mv}mV`);
+                    } else if (currentModeCode !== 3) {
+                      setAdcReadResult(currentModeCode === 1 ? 'not available' : '--');
                     }
+                    try {
+                      await syncPinStateFromStatus(pin.gpio);
+                    } catch { /* best-effort */ }
                   } catch { /* ignore */ }
                 }}
                 className="text-[10px] text-gray-500 hover:text-gray-300 px-1.5 py-0.5 rounded hover:bg-gray-700"
@@ -552,14 +596,18 @@ export function PinConfigSheet({ embedded }: Props) {
             <div className="flex items-center justify-between">
               <span className="text-gray-500">电平</span>
               <span className={`font-mono font-bold ${gpioReadResult === 'HIGH' ? 'text-green-400' : gpioReadResult === 'LOW' ? 'text-red-400' : pinState?.value === 1 ? 'text-green-400' : pinState?.value === 0 ? 'text-red-400' : 'text-gray-600'}`}>
-                {gpioReadResult ?? (pinState?.value === 1 ? 'HIGH' : pinState?.value === 0 ? 'LOW' : '--')}
+                {actualOutputReadUnavailable
+                  ? 'not available'
+                  : gpioReadResult ?? (pinState?.value === 1 ? 'HIGH' : pinState?.value === 0 ? 'LOW' : '--')}
               </span>
             </div>
             {caps.adc && (
               <div className="flex items-center justify-between">
                 <span className="text-gray-500">ADC</span>
                 <span className="font-mono text-purple-300">
-                  {adcReadResult ?? (pinState?.adc_value != null ? `${pinState.adc_value} / ${pinState.adc_voltage_mv}mV` : '--')}
+                  {actualOutputReadUnavailable
+                    ? 'not available'
+                    : adcReadResult ?? (pinState?.adc_value != null ? `${pinState.adc_value} / ${pinState.adc_voltage_mv}mV` : '--')}
                 </span>
               </div>
             )}
@@ -572,7 +620,7 @@ export function PinConfigSheet({ embedded }: Props) {
               {modes.map((m) => (
                 <button
                   key={m.v}
-                  onClick={() => setMode(m.v)}
+                  onClick={() => { setIsEditingGpioForm(true); setMode(m.v); }}
                   className={`px-3 py-1.5 text-xs rounded ${mode === m.v ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
                 >
                   {m.l}
@@ -586,7 +634,7 @@ export function PinConfigSheet({ embedded }: Props) {
             <label className="text-xs text-gray-500 block mb-1.5">上下拉</label>
             <div className="flex gap-1.5">
               {[{ v: 0, l: '无' }, { v: 1, l: '下拉' }, { v: 2, l: '上拉' }].map((p) => (
-                <button key={p.v} onClick={() => setPull(p.v)}
+                <button key={p.v} onClick={() => { setIsEditingGpioForm(true); setPull(p.v); }}
                   className={`px-3 py-1.5 text-xs rounded ${pull === p.v ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>
                   {p.l}
                 </button>
@@ -600,7 +648,7 @@ export function PinConfigSheet({ embedded }: Props) {
               <label className="text-xs text-gray-500 block mb-1.5">触发边沿</label>
               <div className="flex gap-1.5">
                 {[{ v: 0, l: '无' }, { v: 1, l: '上升 ↑' }, { v: 2, l: '下降 ↓' }, { v: 3, l: '双沿 ⇅' }].map((e) => (
-                  <button key={e.v} onClick={() => setEdge(e.v)}
+                  <button key={e.v} onClick={() => { setIsEditingGpioForm(true); setEdge(e.v); }}
                     className={`px-3 py-1.5 text-xs rounded ${edge === e.v ? 'bg-yellow-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>
                     {e.l}
                   </button>
@@ -610,12 +658,12 @@ export function PinConfigSheet({ embedded }: Props) {
           )}
 
           {/* Output level */}
-          {mode === 1 && (
+          {(mode === 1 || mode === 5) && (
             <div>
               <label className="text-xs text-gray-500 block mb-1.5">输出电平</label>
               <div className="flex gap-1.5">
                 {[{ v: 0, l: '低 (0) ○' }, { v: 1, l: '高 (1) ●' }].map((o) => (
-                  <button key={o.v} onClick={() => setOutValue(o.v)}
+                  <button key={o.v} onClick={() => { setIsEditingGpioForm(true); setOutValue(o.v); }}
                     className={`px-3 py-1.5 text-xs rounded ${outValue === o.v ? 'bg-green-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>
                     {o.l}
                   </button>

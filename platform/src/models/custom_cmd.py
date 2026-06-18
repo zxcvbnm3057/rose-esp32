@@ -1,7 +1,7 @@
 """CustomCommand + PinLock + UartConfig ORM models."""
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, Text, DateTime
-from app.db.database import Base
+from ..db.database import Base
 
 
 class CustomCommand(Base):

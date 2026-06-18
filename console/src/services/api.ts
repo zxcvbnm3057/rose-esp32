@@ -146,7 +146,7 @@ export const api = {
         request('/cmds/' + slug + '/execute', { method: 'POST', body: JSON.stringify({ params }) }),
 
     // ── Pin lock & expected state ─────────────────────
-    getLocks: () => request<{ data: { gpio: number; locked: boolean; expected_mode?: number; expected_value?: number }[] }>('/pins/locks'),
+    getLocks: () => request<{ data: { pins: { gpio: number; locked: boolean; expected_mode?: number; expected_value?: number }[]; uarts?: { uart_id: number; baudrate: number; tx_gpio: number; rx_gpio: number; data_bits?: number; parity?: number; stop_bits?: number }[] } }>('/pins/locks'),
     lockPin: (gpio: number, expected_mode?: number, expected_value?: number) =>
         request('/pins/' + gpio + '/lock', { method: 'POST', body: JSON.stringify({ expected_mode, expected_value }) }),
     unlockPin: (gpio: number) =>

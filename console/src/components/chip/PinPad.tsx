@@ -31,7 +31,7 @@ export function PinPad(props: Props) {
     : state?.mode === 'ADC' && state.adc_value != null ? String(state.adc_value)
     : getModeLabel(state?.mode);
 
-  const valueInd = !uartRole && !fixed && state?.mode === 'OUTPUT'
+  const valueInd = !uartRole && !fixed && (state?.mode === 'OUTPUT' || state?.mode === 'INPUT_OUTPUT')
     ? ` ${state.value === 1 ? '●' : '○'}` : '';
 
   const isBound = state?.bound || uartRole;

@@ -16,6 +16,47 @@ from .protocol import MessageFrame, MSG_TYPE_CMD, MSG_TYPE_EVENT, MSG_TYPE_ACK
 
 logger = logging.getLogger(__name__)
 
+# Keepalive tuning (seconds). Aggressive so a silently-dead ESP32 (crash,
+# Wi-Fi drop, reset without TCP FIN) is detected in ~10s instead of lingering
+# as a "stale connection" that keeps accepting commands the device never ACKs
+# (which surfaces as repeated 502s on the HTTP API).
+_KEEPALIVE_IDLE_S = 5     # start probing after 5s of idle
+_KEEPALIVE_INTVL_S = 2    # probe every 2s
+_KEEPALIVE_CNT = 3        # drop after 3 failed probes (~5 + 3*2 = ~11s)
+
+
+def enable_keepalive(sock: socket.socket) -> None:
+    """Enable TCP keepalive on a socket, with platform-specific timing.
+
+    Without this, an ungraceful disconnect (device crash / Wi-Fi loss with no
+    TCP FIN) leaves the OS believing the connection is alive indefinitely, so
+    `recv()` never errors and the server keeps reporting `connected=True`.
+    """
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    except OSError as e:
+        logger.warning(f"Failed to enable SO_KEEPALIVE: {e}")
+        return
+
+    try:
+        if hasattr(socket, "TCP_KEEPIDLE"):
+            # Linux
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, _KEEPALIVE_IDLE_S)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, _KEEPALIVE_INTVL_S)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, _KEEPALIVE_CNT)
+        elif hasattr(socket, "TCP_KEEPALIVE"):
+            # macOS — single "idle before first probe" knob
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPALIVE, _KEEPALIVE_IDLE_S)
+        elif hasattr(socket, "SIO_KEEPALIVE_VALS"):
+            # Windows — (onoff, idle_ms, interval_ms); probe count is fixed by OS
+            sock.ioctl(
+                socket.SIO_KEEPALIVE_VALS,
+                (1, _KEEPALIVE_IDLE_S * 1000, _KEEPALIVE_INTVL_S * 1000),
+            )
+    except OSError as e:
+        logger.warning(f"Failed to tune keepalive timing: {e}")
+
+
 class IoTAgentServer:
     """TCP Server for ESP32 IoT Agent connections."""
 
@@ -161,6 +202,10 @@ class IoTAgentServer:
                 continue
 
             logger.info(f"Client connected from {addr}")
+
+            # Enable TCP keepalive so a silently-dead device is detected by the
+            # OS (~10s) instead of lingering as a stale "connected" socket.
+            enable_keepalive(client_sock)
 
             with self._lock:
                 if self.client_socket:

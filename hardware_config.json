@@ -9,7 +9,7 @@
         "adc": true,
         "signal": true,
         "uart": true,
-        "uart_count": 2,
+        "uart_count": 3,
         "ble": true,
         "thread": true,
         "max_signal_edges": 256,

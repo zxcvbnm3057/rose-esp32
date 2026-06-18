@@ -42,8 +42,7 @@ async def test_uart_config(client, mock_bridge, is_real):
 
 @pytest.mark.anyio
 async def test_uart_send(client, mock_bridge, is_real):
-    if is_real:
-        await _ensure_uart_configured(client)
+    await _ensure_uart_configured(client)
     res = await client.post(f"/api/v1/uart/{_UART_ID}/send", json={"data": "hello"})
     assert res.status_code == 200
     data = res.json()
@@ -53,8 +52,7 @@ async def test_uart_send(client, mock_bridge, is_real):
 
 @pytest.mark.anyio
 async def test_uart_send_base64(client, mock_bridge, is_real):
-    if is_real:
-        await _ensure_uart_configured(client)
+    await _ensure_uart_configured(client)
     encoded = base64.b64encode(b"binary").decode()
     res = await client.post(f"/api/v1/uart/{_UART_ID}/send", json={"data_base64": encoded})
     assert res.status_code == 200
@@ -71,8 +69,8 @@ async def test_uart_send_no_data(client, mock_bridge):
 
 @pytest.mark.anyio
 async def test_uart_read(client, mock_bridge, is_real):
+    await _ensure_uart_configured(client)
     if is_real:
-        await _ensure_uart_configured(client)
         # Send some data first so there's something to read (UART loopback)
         await client.post(f"/api/v1/uart/{_UART_ID}/send", json={"data": "test"})
         await asyncio.sleep(0.3)
@@ -81,3 +79,23 @@ async def test_uart_read(client, mock_bridge, is_real):
     data = res.json()
     assert data["success"] is True
     assert "data_base64" in data["data"]
+
+
+@pytest.mark.anyio
+async def test_uart_send_rejects_unbound_uart(client, mock_bridge, is_real):
+    if is_real:
+        pytest.skip("guard assertion is mock-only")
+    # Ensure UART is unbound first, then sending must be rejected as NOT_BOUND.
+    await client.post(f"/api/v1/port/unbind", json={"resource_type": 1, "id": _UART_ID})
+    res = await client.post(f"/api/v1/uart/{_UART_ID}/send", json={"data": "hello"})
+    assert res.status_code == 409
+
+
+@pytest.mark.anyio
+async def test_uart_read_rejects_unbound_uart(client, mock_bridge, is_real):
+    if is_real:
+        pytest.skip("guard assertion is mock-only")
+    # Ensure UART is unbound first, then reading must be rejected as NOT_BOUND.
+    await client.post(f"/api/v1/port/unbind", json={"resource_type": 1, "id": _UART_ID})
+    res = await client.get(f"/api/v1/uart/{_UART_ID}/read?length=256")
+    assert res.status_code == 409

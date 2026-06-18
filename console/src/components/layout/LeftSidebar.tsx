@@ -19,7 +19,7 @@ const CMD_GROUPS: { group: string; icon: string; items: CmdDef[] }[] = [
         { name: 'gpio', label: 'GPIO' },
         { name: 'mode', label: '模式', type: 'select', options: [
           { v: '0', l: 'INPUT' }, { v: '1', l: 'OUTPUT' },
-          { v: '2', l: 'INTERRUPT' }, { v: '3', l: 'ADC' }, { v: '4', l: 'SIGNAL' },
+          { v: '2', l: 'INTERRUPT' }, { v: '3', l: 'ADC' }, { v: '4', l: 'SIGNAL' }, { v: '5', l: 'INPUT_OUTPUT' },
         ]},
         { name: 'pull', label: '上下拉', type: 'select', options: [
           { v: '0', l: '无' }, { v: '1', l: '下拉' }, { v: '2', l: '上拉' },

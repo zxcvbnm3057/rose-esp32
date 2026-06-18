@@ -1,12 +1,12 @@
 # Rose-ESP32 Platform
 
-Python FastAPI 平台层，作为公共底层连接 ESP32 IoT Agent、上层业务后端（`app/`）与操作界面（`console/`）。
+Python FastAPI 平台层，作为公共底层连接 ESP32 IoT Agent、上层业务后端（根目录 `app/`）与操作界面（`console/`）。
 
 ## 架构
 
 ```
 platform/
-├── app/
+├── src/
 │   ├── main.py          # FastAPI 入口 + WebSocket + 事件总线
 │   ├── config.py        # 硬件配置加载
 │   ├── api/             # REST 路由 (GPIO, BLE, UART, Pins, System...)
@@ -16,7 +16,7 @@ platform/
 │   ├── db/              # 数据库初始化
 │   └── bridge/          # IoT Agent TCP 协议 (symlink → ../../bridge/src)
 ├── tests/               # pytest 测试
-├── requirements.txt
+├── ../requirements.txt
 └── pytest.ini
 ```
 
@@ -26,10 +26,10 @@ platform/
 cd platform
 
 # 安装依赖 (conda)
-.\.conda\python.exe -m pip install -r requirements.txt
+..\.conda\python.exe -m pip install -r ..\requirements.txt
 
 # 启动 (Mock 模式，无需 ESP32)
-.\.conda\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+..\.conda\python.exe -m uvicorn src.main:app --host 0.0.0.0 --port 8000
 
 # 启动 (真实设备模式 — ESP32 需已连接)
 # 同上，ESP32 TCP 连上 :8080 后自动同步
@@ -56,6 +56,12 @@ cd platform
 | `/api/v1/uart/{n}/send` | POST | UART 发送 |
 | `/ws` | WebSocket | 多客户端实时状态推送 + 受限指令通道 |
 
+### 资源约束
+
+- `gpio_set` 只允许对**已绑定**且模式为 `OUTPUT` / `INPUT_OUTPUT` 的 GPIO 操作。
+- 若 GPIO 当前被某个 UART 占用为 `TX/RX` 引脚，则 `gpio_set` 必须失败。
+- `uart_send` / `uart_read` 只允许对**已完整配置/绑定**的 UART 操作。
+
 ## WebSocket 角色模型
 
 `/ws` 支持多个客户端同时接入，并按角色进行权限控制：
@@ -81,11 +87,11 @@ cd platform
 
 ```bash
 # Mock 模式
-.\.conda\python.exe -m pytest tests/ -v
+..\.conda\python.exe -m pytest tests/ -v
 
 # 真实设备
 $env:USE_REAL_DEVICE=1
-.\.conda\python.exe -m pytest tests/ -v --ignore=tests/test_ws.py
+..\.conda\python.exe -m pytest tests/ -v --ignore=tests/test_ws.py
 ```
 
 ## 事件流

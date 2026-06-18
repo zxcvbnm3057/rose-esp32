@@ -61,7 +61,7 @@ ws://127.0.0.1:8000/ws?role=console
 
 | 面板 | 说明 |
 |------|------|
-| **芯片视图** | ESP32 引脚布局，点击配置模式 (INPUT/OUTPUT/ADC/SIGNAL) |
+| **芯片视图** | ESP32 引脚布局，点击配置模式 (INPUT/OUTPUT/INPUT_OUTPUT/ADC/SIGNAL) |
 | **BLE 面板** | 配对开关 + PIN 码显示 + 已连接设备 RSSI |
 | **设备状态** | 实时 GPIO 状态、UART 绑定 |
 | **自定义指令** | 用户自定义命令 CRUD + 执行 |
@@ -89,6 +89,12 @@ useDeviceStore
 | `ble_peer_connected` | `upsertBlePeer` |
 | `ble_peer_disconnected` | `removeBlePeer` |
 | `ble_rssi` | `upsertBlePeer` (更新 RSSI) |
+
+## GPIO 模式语义
+
+- `OUTPUT`：纯输出模式。控制台不会假装可读回；状态区读数显示 `not available`。
+- `INPUT_OUTPUT`：独立的双向模式，语义上与 `OUTPUT` 分离。
+- 若某 GPIO 已被 UART 绑定为 `TX/RX`，控制台不应再把它当普通 GPIO 输出使用。
 
 ## 构建
 

@@ -38,6 +38,26 @@ async def test_gpio_set(client, mock_bridge, is_real):
 
 
 @pytest.mark.anyio
+async def test_gpio_set_reads_back_written_value(client, mock_bridge, is_real):
+    if is_real:
+        pytest.skip("readback assertion is mock-only")
+    from unittest.mock import patch, AsyncMock
+    from src.services import bridge_service
+
+    with patch.object(bridge_service, "gpio_set", new=AsyncMock(return_value=True)), \
+         patch.object(bridge_service, "gpio_get", new=AsyncMock(return_value=1)), \
+         patch.object(bridge_service, "port_status", new=AsyncMock(return_value={
+             "resource_type": 0, "id": 5, "in_use": True, "mode": 1, "value": 1,
+         })):
+        res = await client.post("/api/v1/gpio/5/set", json={"value": 1})
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    assert data["data"]["value"] == 1
+
+
+@pytest.mark.anyio
 async def test_gpio_get(client, mock_bridge, is_real):
     res = await client.get("/api/v1/gpio/5/get")
     assert res.status_code == 200
@@ -74,6 +94,27 @@ async def test_gpio_set_invalid_value(client, mock_bridge):
     assert res.status_code == 422
 
 
+@pytest.mark.anyio
+async def test_gpio_set_rejects_unbound_pin(client, mock_bridge, is_real):
+    if is_real:
+        pytest.skip("guard assertion is mock-only")
+    await client.post("/api/v1/port/unbind", json={"resource_type": 0, "id": 5})
+    res = await client.post("/api/v1/gpio/5/set", json={"value": 1})
+    assert res.status_code == 502
+
+
+@pytest.mark.anyio
+async def test_gpio_set_rejects_uart_pin(client, mock_bridge, is_real):
+    if is_real:
+        pytest.skip("guard assertion is mock-only")
+    cfg = await client.post("/api/v1/uart/1/config", json={
+        "baudrate": 115200, "tx_gpio": 7, "rx_gpio": 10,
+    })
+    assert cfg.status_code == 200
+    res = await client.post("/api/v1/gpio/7/set", json={"value": 1})
+    assert res.status_code == 502
+
+
 # ── Error paths ───────────────────────────────────────────
 
 @pytest.mark.anyio
@@ -90,7 +131,7 @@ async def test_gpio_get_device_not_connected(client, is_real):
     if is_real:
         pytest.skip("real device is connected; disconnect path is mock-only")
     from unittest.mock import patch
-    from app.services import bridge_service
+    from src.services import bridge_service
     with patch.object(bridge_service, "is_connected", return_value=False):
         res = await client.get("/api/v1/gpio/5/get")
     assert res.status_code == 503
@@ -103,7 +144,7 @@ async def test_gpio_get_bridge_failure_returns_502(client, is_real):
     if is_real:
         pytest.skip("bridge failure injection is mock-only")
     from unittest.mock import patch, AsyncMock
-    from app.services import bridge_service
+    from src.services import bridge_service
     with patch.object(bridge_service, "is_connected", return_value=True), \
          patch.object(bridge_service, "gpio_get", new=AsyncMock(return_value=None)):
         res = await client.get("/api/v1/gpio/5/get")

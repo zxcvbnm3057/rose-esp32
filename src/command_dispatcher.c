@@ -75,6 +75,35 @@ static void clear_pending_ack(uint32_t correlation_id)
     }
 }
 
+static bool is_uart_gpio(uint8_t gpio)
+{
+    if (gpio >= 31)
+    {
+        return false;
+    }
+    for (int i = 0; i < IOT_UART_NUM_MAX; i++)
+    {
+        if (!uart_table[i].in_use)
+        {
+            continue;
+        }
+        if (uart_table[i].tx_pin == gpio || uart_table[i].rx_pin == gpio)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool uart_is_fully_bound(uint8_t uart_id)
+{
+    if (uart_id >= IOT_UART_NUM_MAX)
+    {
+        return false;
+    }
+    return uart_table[uart_id].in_use && uart_table[uart_id].tx_pin < 31 && uart_table[uart_id].rx_pin < 31 && uart_table[uart_id].baudrate > 0;
+}
+
 static void store_pending_thread_result(uint16_t device_id, uint16_t payload_len, uint32_t correlation_id, uint8_t *payload)
 {
     if (correlation_id == 0 || pending_thread_count >= MAX_PENDING_SYNC)
@@ -163,7 +192,7 @@ static bool resend_pending_items_for_correlation(uint32_t correlation_id)
     return resent;
 }
 
-static void send_pending_sync_snapshot(void)
+static void send_pending_sync_snapshot(uint16_t cmd_id)
 {
     uint16_t port_status_count = 0;
     for (int i = 0; i < 31; i++)
@@ -182,6 +211,7 @@ static void send_pending_sync_snapshot(void)
     }
 
     event_sync_response_t sync_event = {
+        .cmd_id = cmd_id,
         .session_version = session_version,
         .pending_cmd_count = (uint16_t)pending_ack_count,
         .pending_thread_count = (uint16_t)pending_thread_count,
@@ -375,7 +405,7 @@ void handle_command(msg_frame_t *frame)
         cmd_gpio_config_t *cmd = (cmd_gpio_config_t *)&frame->payload[1];
         if (cmd->gpio >= 31)
         {
-            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, 1, 0}, sizeof(event_cmd_ack_t));
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_INVALID_ARG, 0}, sizeof(event_cmd_ack_t));
             break;
         }
         xSemaphoreTake(resource_mutex, portMAX_DELAY);
@@ -393,6 +423,9 @@ void handle_command(msg_frame_t *frame)
         {
         case IOT_GPIO_MODE_OUTPUT:
             io_conf.mode = GPIO_MODE_OUTPUT;
+            break;
+        case IOT_GPIO_MODE_INPUT_OUTPUT:
+            io_conf.mode = GPIO_MODE_INPUT_OUTPUT;
             break;
         case IOT_GPIO_MODE_INPUT:
         case IOT_GPIO_MODE_ADC:
@@ -425,9 +458,9 @@ void handle_command(msg_frame_t *frame)
     case CMD_GPIO_SET:
     {
         cmd_gpio_set_t *cmd = (cmd_gpio_set_t *)&frame->payload[1];
-        if (cmd->gpio >= 31 || gpio_table[cmd->gpio].mode != IOT_GPIO_MODE_OUTPUT)
+        if (cmd->gpio >= 31 || !gpio_table[cmd->gpio].in_use || (gpio_table[cmd->gpio].mode != IOT_GPIO_MODE_OUTPUT && gpio_table[cmd->gpio].mode != IOT_GPIO_MODE_INPUT_OUTPUT) || is_uart_gpio(cmd->gpio))
         {
-            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, 2, 0}, sizeof(event_cmd_ack_t));
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_WRONG_MODE, 0}, sizeof(event_cmd_ack_t));
             break;
         }
         gpio_set_level(cmd->gpio, cmd->value);
@@ -443,13 +476,17 @@ void handle_command(msg_frame_t *frame)
         cmd_gpio_get_t *cmd = (cmd_gpio_get_t *)&frame->payload[1];
         if (cmd->gpio >= 31)
         {
-            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, 1, 0}, sizeof(event_cmd_ack_t));
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_INVALID_ARG, 0}, sizeof(event_cmd_ack_t));
             break;
         }
-        uint8_t value = gpio_get_level(cmd->gpio);
+        uint8_t value = gpio_table[cmd->gpio].value;
+        if (gpio_table[cmd->gpio].mode != IOT_GPIO_MODE_OUTPUT)
+        {
+            value = gpio_get_level(cmd->gpio);
+        }
         gpio_table[cmd->gpio].value = value;
         gpio_table[cmd->gpio].last_ts = esp_timer_get_time();
-        event_gpio_value_t event = {cmd->gpio, value, esp_timer_get_time()};
+        event_gpio_value_t event = {cmd_id, cmd->gpio, value, esp_timer_get_time()};
         send_event(EVENT_GPIO_VALUE, &event, sizeof(event_gpio_value_t));
         break;
     }
@@ -459,13 +496,13 @@ void handle_command(msg_frame_t *frame)
         cmd_adc_sample_t *cmd = (cmd_adc_sample_t *)&frame->payload[1];
         if (cmd->gpio >= 31)
         {
-            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, 1, 0}, sizeof(event_cmd_ack_t));
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_INVALID_ARG, 0}, sizeof(event_cmd_ack_t));
             break;
         }
         uint16_t value = adc_read_sample(cmd->gpio, cmd->samples);
         gpio_table[cmd->gpio].adc_value = value;
         gpio_table[cmd->gpio].adc_voltage_mv = (uint16_t)(value * 3300 / 4095);
-        event_adc_value_t event = {cmd->gpio, value, esp_timer_get_time()};
+        event_adc_value_t event = {cmd_id, cmd->gpio, value, esp_timer_get_time()};
         send_event(EVENT_ADC_VALUE, &event, sizeof(event_adc_value_t));
         break;
     }
@@ -475,7 +512,7 @@ void handle_command(msg_frame_t *frame)
         cmd_gpio_signal_tx_t *cmd = (cmd_gpio_signal_tx_t *)&frame->payload[1];
         if (cmd->gpio >= 31 || gpio_table[cmd->gpio].mode != IOT_GPIO_MODE_SIGNAL)
         {
-            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_INVALID_STATE, 0}, sizeof(event_cmd_ack_t));
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_WRONG_MODE, 0}, sizeof(event_cmd_ack_t));
             break;
         }
 
@@ -490,7 +527,7 @@ void handle_command(msg_frame_t *frame)
         uint8_t *signal_data = (uint8_t *)malloc(signal_data_size);
         if (!signal_data)
         {
-            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_UNSUPPORTED, 0}, sizeof(event_cmd_ack_t));
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_NO_MEM, 0}, sizeof(event_cmd_ack_t));
             break;
         }
 
@@ -502,6 +539,8 @@ void handle_command(msg_frame_t *frame)
             .gpio = cmd->gpio,
             .signal_len = cmd->signal_len,
             .delay_us = cmd->delay_us,
+            .carrier_hz = cmd->carrier_hz,
+            .duty_cycle = cmd->duty_cycle,
             .signal_data = signal_data,
             .tx_channel = -1,
             .rx_channel = -1,
@@ -521,7 +560,7 @@ void handle_command(msg_frame_t *frame)
         cmd_gpio_signal_exchange_t *cmd = (cmd_gpio_signal_exchange_t *)&frame->payload[1];
         if (cmd->gpio >= 31 || gpio_table[cmd->gpio].mode != IOT_GPIO_MODE_SIGNAL)
         {
-            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_INVALID_STATE, 0}, sizeof(event_cmd_ack_t));
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_WRONG_MODE, 0}, sizeof(event_cmd_ack_t));
             break;
         }
 
@@ -533,7 +572,7 @@ void handle_command(msg_frame_t *frame)
             signal_data = (uint8_t *)malloc(tx_data_size);
             if (!signal_data)
             {
-                send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_UNSUPPORTED, 0}, sizeof(event_cmd_ack_t));
+                send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_NO_MEM, 0}, sizeof(event_cmd_ack_t));
                 break;
             }
             uint8_t *payload_ptr = (uint8_t *)cmd + sizeof(cmd_gpio_signal_exchange_t);
@@ -545,6 +584,8 @@ void handle_command(msg_frame_t *frame)
             .gpio = cmd->gpio,
             .signal_len = cmd->tx_len,
             .delay_us = cmd->delay_us,
+            .carrier_hz = cmd->carrier_hz,
+            .duty_cycle = cmd->duty_cycle,
             .signal_data = signal_data,
             .tx_channel = -1,
             .rx_channel = -1,
@@ -566,7 +607,7 @@ void handle_command(msg_frame_t *frame)
         cmd_gpio_signal_rx_t *cmd = (cmd_gpio_signal_rx_t *)&frame->payload[1];
         if (cmd->gpio >= 31 || gpio_table[cmd->gpio].mode != IOT_GPIO_MODE_SIGNAL)
         {
-            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_INVALID_STATE, 0}, sizeof(event_cmd_ack_t));
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_WRONG_MODE, 0}, sizeof(event_cmd_ack_t));
             break;
         }
 
@@ -592,13 +633,13 @@ void handle_command(msg_frame_t *frame)
         cmd_uart_config_t *cmd = (cmd_uart_config_t *)&frame->payload[1];
         if (cmd->uart_id >= IOT_UART_NUM_MAX)
         {
-            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, 5, 0}, sizeof(event_cmd_ack_t));
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_INVALID_ARG, 0}, sizeof(event_cmd_ack_t));
             break;
         }
 
         if (cmd->data_bits < 5 || cmd->data_bits > 8)
         {
-            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, 5, 0}, sizeof(event_cmd_ack_t));
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_INVALID_ARG, 0}, sizeof(event_cmd_ack_t));
             break;
         }
 
@@ -656,18 +697,18 @@ void handle_command(msg_frame_t *frame)
 
         if (uart_param_config(cmd->uart_id, &uart_config) != ESP_OK)
         {
-            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, 3, 0}, sizeof(event_cmd_ack_t));
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_DRIVER, 0}, sizeof(event_cmd_ack_t));
             break;
         }
         if (uart_set_pin(cmd->uart_id, cmd->tx_gpio, cmd->rx_gpio, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE) != ESP_OK)
         {
-            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, 3, 0}, sizeof(event_cmd_ack_t));
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_DRIVER, 0}, sizeof(event_cmd_ack_t));
             break;
         }
         QueueHandle_t uart_event_queue = NULL;
         if (uart_driver_install(cmd->uart_id, 1024, 1024, 16, &uart_event_queue, 0) != ESP_OK)
         {
-            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, 3, 0}, sizeof(event_cmd_ack_t));
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_DRIVER, 0}, sizeof(event_cmd_ack_t));
             break;
         }
 
@@ -684,15 +725,15 @@ void handle_command(msg_frame_t *frame)
     case CMD_UART_SEND:
     {
         cmd_uart_send_t *cmd = (cmd_uart_send_t *)&frame->payload[1];
-        if (cmd->uart_id >= IOT_UART_NUM_MAX || !uart_table[cmd->uart_id].in_use)
+        if (!uart_is_fully_bound(cmd->uart_id))
         {
-            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, 5, 0}, sizeof(event_cmd_ack_t));
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_NOT_BOUND, 0}, sizeof(event_cmd_ack_t));
             break;
         }
         int written = uart_write_bytes(cmd->uart_id, (const char *)cmd->data, cmd->length);
         if (written != cmd->length)
         {
-            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, 3, 0}, sizeof(event_cmd_ack_t));
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_DRIVER, 0}, sizeof(event_cmd_ack_t));
         }
         else
         {
@@ -704,9 +745,9 @@ void handle_command(msg_frame_t *frame)
     case CMD_UART_READ:
     {
         cmd_uart_read_t *cmd = (cmd_uart_read_t *)&frame->payload[1];
-        if (cmd->uart_id >= IOT_UART_NUM_MAX || !uart_table[cmd->uart_id].in_use)
+        if (!uart_is_fully_bound(cmd->uart_id))
         {
-            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, 5, 0}, sizeof(event_cmd_ack_t));
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_NOT_BOUND, 0}, sizeof(event_cmd_ack_t));
             break;
         }
 
@@ -720,7 +761,7 @@ void handle_command(msg_frame_t *frame)
         int available = uart_read_bytes(cmd->uart_id, rx_buf, read_len, pdMS_TO_TICKS(50));
         if (available < 0)
         {
-            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, 3, 0}, sizeof(event_cmd_ack_t));
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_DRIVER, 0}, sizeof(event_cmd_ack_t));
             break;
         }
 
@@ -728,7 +769,7 @@ void handle_command(msg_frame_t *frame)
         uint8_t *event_buf = (uint8_t *)malloc(event_size);
         if (!event_buf)
         {
-            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, 5, 0}, sizeof(event_cmd_ack_t));
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_NO_MEM, 0}, sizeof(event_cmd_ack_t));
             break;
         }
 
@@ -774,7 +815,7 @@ void handle_command(msg_frame_t *frame)
             }
         }
         xSemaphoreGive(resource_mutex);
-        send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, 4, 0}, sizeof(event_cmd_ack_t));
+        send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_RESOURCE_CONFLICT, 0}, sizeof(event_cmd_ack_t));
         break;
     }
 
@@ -835,7 +876,7 @@ void handle_command(msg_frame_t *frame)
             }
         }
         xSemaphoreGive(resource_mutex);
-        send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, 4, 0}, sizeof(event_cmd_ack_t));
+        send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_NOT_BOUND, 0}, sizeof(event_cmd_ack_t));
         break;
     }
 
@@ -885,7 +926,7 @@ void handle_command(msg_frame_t *frame)
 
         if (!found)
         {
-            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, 6, 0}, sizeof(event_cmd_ack_t));
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_NOT_FOUND, 0}, sizeof(event_cmd_ack_t));
             break;
         }
 
@@ -922,7 +963,7 @@ void handle_command(msg_frame_t *frame)
     case CMD_BLE_ENABLE_PAIRING:
     {
         cmd_ble_enable_pairing_t *cmd = (cmd_ble_enable_pairing_t *)&frame->payload[1];
-        ble_enable_pairing(cmd->timeout_s);
+        ble_enable_pairing(cmd_id, cmd->timeout_s);
         send_event(EVENT_CMD_ACK, &(event_cmd_ack_t){cmd_id, 0, 0, 0}, sizeof(event_cmd_ack_t));
         break;
     }
@@ -947,6 +988,7 @@ void handle_command(msg_frame_t *frame)
             break;
 
         event_ble_peers_list_t *evt = (event_ble_peers_list_t *)response;
+        evt->cmd_id = cmd_id;
         evt->peer_count = peer_count;
 
         uint8_t *data_ptr = response + sizeof(event_ble_peers_list_t);
@@ -980,7 +1022,7 @@ void handle_command(msg_frame_t *frame)
     case CMD_SYNC_REQUEST:
     {
         send_cmd_ack(cmd_id, 0, 0, 0);
-        send_pending_sync_snapshot();
+        send_pending_sync_snapshot(cmd_id);
         break;
     }
 
@@ -1007,6 +1049,6 @@ void handle_command(msg_frame_t *frame)
 
     default:
         ESP_LOGW(TAG, "Unknown command opcode: 0x%02X", opcode);
-        send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, 0xFF, 0}, sizeof(event_cmd_ack_t));
+        send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_UNKNOWN_CMD, 0}, sizeof(event_cmd_ack_t));
     }
 }

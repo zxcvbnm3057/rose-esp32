@@ -11,6 +11,11 @@
 
 static const char *TAG = "gpio_signal";
 
+#define RMT_SOURCE_CLK_HZ 80000000UL
+#define RMT_CLK_DIV 80UL
+#define RMT_TICK_HZ (RMT_SOURCE_CLK_HZ / RMT_CLK_DIV)
+#define RMT_TX_MAX_CARRIER_HZ (RMT_TICK_HZ / 2)
+
 static QueueHandle_t gpio_signal_tx_queue = NULL;
 static QueueHandle_t gpio_signal_rx_queue = NULL;
 static SemaphoreHandle_t rmt_resource_mutex = NULL;
@@ -91,7 +96,7 @@ void release_rmt_rx_channel(int8_t channel)
     xSemaphoreGive(rmt_resource_mutex);
 }
 
-static uint8_t *build_signal_capture_payload(uint8_t gpio, const signal_edge_t *edges, uint16_t edge_count, size_t *out_size)
+static uint8_t *build_signal_capture_payload(uint16_t cmd_id, uint8_t gpio, const signal_edge_t *edges, uint16_t edge_count, size_t *out_size)
 {
     size_t payload_size = sizeof(event_gpio_signal_captured_t) + ((size_t)edge_count * 5);
     uint8_t *payload = (uint8_t *)malloc(payload_size);
@@ -101,6 +106,7 @@ static uint8_t *build_signal_capture_payload(uint8_t gpio, const signal_edge_t *
     }
 
     event_gpio_signal_captured_t *evt = (event_gpio_signal_captured_t *)payload;
+    evt->cmd_id = cmd_id;
     evt->gpio = gpio;
     evt->edge_count = edge_count;
     evt->timestamp_us = esp_timer_get_time();
@@ -162,6 +168,20 @@ void gpio_signal_tx_task(void *pvParameters)
             ESP_LOGI(TAG, "TX: GPIO %d, signal_len %d, delay_us %d",
                      item.gpio, item.signal_len, item.delay_us);
 
+            bool carrier_enabled = item.carrier_hz > 0;
+            if (carrier_enabled)
+            {
+                if (item.carrier_hz > RMT_TX_MAX_CARRIER_HZ || item.duty_cycle <= 0.0f || item.duty_cycle > 1.0f)
+                {
+                    ESP_LOGW(TAG, "Invalid carrier config gpio=%d carrier_hz=%lu duty=%.3f",
+                             item.gpio, (unsigned long)item.carrier_hz, item.duty_cycle);
+                    event_cmd_ack_t err = {item.cmd_id, 1, IOT_ERR_INVALID_ARG};
+                    send_event(EVENT_ERROR, &err, sizeof(event_cmd_ack_t));
+                    free(item.signal_data);
+                    continue;
+                }
+            }
+
             // Reserve channels only when command is actually executing.
             if (!reserve_rmt_tx_channel(&item.tx_channel))
             {
@@ -201,11 +221,14 @@ void gpio_signal_tx_task(void *pvParameters)
                     .rmt_mode = RMT_MODE_TX,
                     .channel = item.tx_channel,
                     .gpio_num = item.gpio,
-                    .clk_div = 80,
+                    .clk_div = RMT_CLK_DIV,
                     .mem_block_num = (uint8_t)mem_blocks,
                     .tx_config = {
                         .loop_en = false,
-                        .carrier_en = false,
+                        .carrier_en = carrier_enabled,
+                        .carrier_freq_hz = item.carrier_hz,
+                        .carrier_duty_percent = (uint8_t)(item.duty_cycle * 100.0f + 0.5f),
+                        .carrier_level = RMT_CARRIER_LEVEL_HIGH,
                         .idle_output_en = true,
                         .idle_level = RMT_IDLE_LEVEL_LOW,
                     }};
@@ -241,7 +264,7 @@ void gpio_signal_tx_task(void *pvParameters)
                 rmt_item32_t *chunk_buf = calloc(max_chunk, sizeof(rmt_item32_t));
                 if (!chunk_buf)
                 {
-                    event_cmd_ack_t err = {item.cmd_id, 1, 5};
+                    event_cmd_ack_t err = {item.cmd_id, 1, IOT_ERR_NO_MEM};
                     send_event(EVENT_ERROR, &err, sizeof(event_cmd_ack_t));
                     rmt_driver_uninstall(tx_config.channel);
                     release_rmt_tx_channel(item.tx_channel);
@@ -326,7 +349,11 @@ void gpio_signal_tx_task(void *pvParameters)
                     // 由 bridge 软件层处理，芯片不承担该逻辑。
                     uint16_t filter_ticks = 1;
                     // End RX frame after a quiet period; avoids indefinite/empty capture behavior.
-                    uint16_t idle_ticks = (item.rx_total_us > 0) ? (uint16_t)((item.rx_total_us > 60000) ? 60000 : item.rx_total_us) : 10000;
+                    // NOTE: RMT idle_threshold is a 15-bit field (max 32767 ticks @1us).
+                    // Total capture duration is bounded by the software loop (rx_total_us),
+                    // not this value, so just pick a safe gap that exceeds one IR frame's
+                    // internal spacing but stays within the register limit.
+                    uint16_t idle_ticks = 12000;
 
                     // Configure RX channel
                     rmt_config_t rx_config = {
@@ -372,7 +399,7 @@ void gpio_signal_tx_task(void *pvParameters)
                     signal_edge_t *rx_edges = malloc(sizeof(signal_edge_t) * item.rx_max_edges);
                     if (!rx_edges)
                     {
-                        event_cmd_ack_t err = {item.cmd_id, 1, 5};
+                        event_cmd_ack_t err = {item.cmd_id, 1, IOT_ERR_NO_MEM};
                         send_event(EVENT_ERROR, &err, sizeof(event_cmd_ack_t));
                         rmt_rx_stop(rx_config.channel);
                         rmt_driver_uninstall(rx_config.channel);
@@ -423,7 +450,7 @@ void gpio_signal_tx_task(void *pvParameters)
                         item.rx_channel = -1;
 
                         size_t payload_size = 0;
-                        uint8_t *payload = build_signal_capture_payload(item.gpio, rx_edges, (uint16_t)edged, &payload_size);
+                        uint8_t *payload = build_signal_capture_payload(item.cmd_id, item.gpio, rx_edges, (uint16_t)edged, &payload_size);
                         if (payload)
                         {
                             send_event(EVENT_GPIO_SIGNAL_CAPTURED, payload, payload_size);
@@ -444,10 +471,15 @@ void gpio_signal_tx_task(void *pvParameters)
             else if (item.do_rx)
             {
                 // TX empty, RX only (exchange with 0 tx edges).
-                // Release unused TX channel and reserve RX channel.
+                // Release the unused TX channel. The RX channel was already
+                // reserved above (right after dequeue); reuse it here.
+                // NOTE: do NOT reserve the RX channel again — doing so leaks the
+                // previously reserved channel and, after both RX channels are
+                // exhausted, makes every subsequent capture fail (the classic
+                // "first capture works, all later ones 502" symptom).
                 release_rmt_tx_channel(item.tx_channel);
                 item.tx_channel = -1;
-                if (!reserve_rmt_rx_channel(&item.rx_channel))
+                if (item.rx_channel < 0)
                 {
                     event_cmd_ack_t err = {item.cmd_id, 1, IOT_ERR_RESOURCE_EXHAUSTED};
                     send_event(EVENT_ERROR, &err, sizeof(event_cmd_ack_t));
@@ -464,7 +496,10 @@ void gpio_signal_tx_task(void *pvParameters)
                 {
                     // 始终最细分辨率采集；分辨率合并交给 bridge 软件层。
                     uint16_t filter_ticks = 1;
-                    uint16_t idle_ticks = (item.rx_total_us > 0) ? (uint16_t)((item.rx_total_us > 60000) ? 60000 : item.rx_total_us) : 10000;
+                    // RMT idle_threshold 为 15-bit 字段（最大 32767 ticks @1us）。
+                    // 总抓包时长由软件循环 rx_total_us 控制，这里只需一个足够跨过
+                    // 单个红外帧内部最大间隔、又不超寄存器上限的安全值。
+                    uint16_t idle_ticks = 12000;
 
                     rmt_config_t rx_config = {
                         .rmt_mode = RMT_MODE_RX,
@@ -503,7 +538,7 @@ void gpio_signal_tx_task(void *pvParameters)
                     signal_edge_t *rx_edges = malloc(sizeof(signal_edge_t) * item.rx_max_edges);
                     if (!rx_edges)
                     {
-                        event_cmd_ack_t err = {item.cmd_id, 1, 5};
+                        event_cmd_ack_t err = {item.cmd_id, 1, IOT_ERR_NO_MEM};
                         send_event(EVENT_ERROR, &err, sizeof(event_cmd_ack_t));
                         rmt_rx_stop(rx_config.channel);
                         rmt_driver_uninstall(rx_config.channel);
@@ -544,7 +579,7 @@ void gpio_signal_tx_task(void *pvParameters)
                         rmt_driver_uninstall(rx_config.channel);
 
                         size_t payload_size = 0;
-                        uint8_t *payload = build_signal_capture_payload(item.gpio, rx_edges, (uint16_t)edged, &payload_size);
+                        uint8_t *payload = build_signal_capture_payload(item.cmd_id, item.gpio, rx_edges, (uint16_t)edged, &payload_size);
                         if (payload)
                         {
                             send_event(EVENT_GPIO_SIGNAL_CAPTURED, payload, payload_size);
@@ -615,7 +650,7 @@ void gpio_signal_rx_task(void *pvParameters)
             signal_edge_t *edges = (signal_edge_t *)malloc(sizeof(signal_edge_t) * item.max_edges);
             if (!edges)
             {
-                event_cmd_ack_t err = {item.cmd_id, 1, 5};
+                event_cmd_ack_t err = {item.cmd_id, 1, IOT_ERR_NO_MEM};
                 send_event(EVENT_ERROR, &err, sizeof(event_cmd_ack_t));
                 release_rmt_rx_channel(item.rx_channel);
                 continue;
@@ -637,7 +672,7 @@ void gpio_signal_rx_task(void *pvParameters)
                 }
                 else
                 {
-                    event_cmd_ack_t err = {item.cmd_id, 1, 6};
+                    event_cmd_ack_t err = {item.cmd_id, 1, IOT_ERR_DRIVER};
                     send_event(EVENT_ERROR, &err, sizeof(event_cmd_ack_t));
                     free(edges);
                     capture_edges = NULL;
@@ -664,7 +699,7 @@ void gpio_signal_rx_task(void *pvParameters)
 
             // Build and send captured data event
             size_t payload_size = 0;
-            uint8_t *payload = build_signal_capture_payload(item.gpio, edges, (uint16_t)capture_edge_count, &payload_size);
+            uint8_t *payload = build_signal_capture_payload(item.cmd_id, item.gpio, edges, (uint16_t)capture_edge_count, &payload_size);
 
             if (payload)
             {

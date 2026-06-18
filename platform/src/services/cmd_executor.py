@@ -83,7 +83,13 @@ async def _execute_step(step_type: str, config: dict, ctx: dict) -> Any:
 
     if step_type == "signal_tx":
         sig = [{"level": s["level"], "duration_us": s["duration_us"]} for s in config.get("signal", [])]
-        ok = await bridge_service.signal_tx(config["gpio"], sig, config.get("delay_us", 0))
+        ok = await bridge_service.signal_tx(
+            config["gpio"],
+            sig,
+            config.get("delay_us", 0),
+            config.get("carrier_hz", 0),
+            config.get("duty_cycle", 0.5),
+        )
         return {"ack": ok}
 
     if step_type == "signal_rx":
@@ -95,6 +101,7 @@ async def _execute_step(step_type: str, config: dict, ctx: dict) -> Any:
         result = await bridge_service.signal_exchange(
             config["gpio"], tx, config.get("delay_us", 0),
             config.get("rx_total_us", 500000), config.get("rx_max_edges", 100),
+            config.get("carrier_hz", 0), config.get("duty_cycle", 0.5),
         )
         return {"edges": result}
 

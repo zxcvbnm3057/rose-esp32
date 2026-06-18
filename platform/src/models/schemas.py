@@ -14,7 +14,7 @@ class ApiResponse(BaseModel):
 
 # ── GPIO ──────────────────────────────────────────────────────
 class GpioConfigRequest(BaseModel):
-    mode: int = Field(..., ge=0, le=4, description="0=INPUT 1=OUTPUT 2=INTERRUPT 3=ADC 4=SIGNAL")
+    mode: int = Field(..., ge=0, le=5, description="0=INPUT 1=OUTPUT 2=INTERRUPT 3=ADC 4=SIGNAL 5=INPUT_OUTPUT")
     pull: int = Field(default=0, ge=0, le=2, description="0=NONE 1=DOWN 2=UP")
     edge: int = Field(default=0, ge=0, le=3)
 
@@ -35,6 +35,8 @@ class SignalEdge(BaseModel):
 class SignalTxRequest(BaseModel):
     signal: list[SignalEdge] = Field(..., max_length=256)
     delay_us: int = Field(default=0, ge=0)
+    carrier_hz: int = Field(default=0, ge=0, le=500_000)
+    duty_cycle: float = Field(default=0.5, gt=0.0, le=1.0)
 
 
 class SignalRxRequest(BaseModel):
@@ -48,6 +50,8 @@ class SignalRxRequest(BaseModel):
 class SignalExchangeRequest(BaseModel):
     tx_signal: list[SignalEdge] = Field(..., max_length=256)
     delay_us: int = Field(default=0, ge=0)
+    carrier_hz: int = Field(default=0, ge=0, le=500_000)
+    duty_cycle: float = Field(default=0.5, gt=0.0, le=1.0)
     rx_total_us: int = Field(default=500_000, ge=1)
     rx_max_edges: int = Field(default=100, ge=1, le=256)
     # Software glitch-merge resolution (preset name or microseconds). The

@@ -57,7 +57,7 @@ export interface HardwareConfig {
 
 export interface PinState {
     gpio: number;
-    mode: 'UNCONFIGURED' | 'INPUT' | 'OUTPUT' | 'INTERRUPT' | 'ADC' | 'SIGNAL';
+    mode: 'UNCONFIGURED' | 'INPUT' | 'OUTPUT' | 'INTERRUPT' | 'ADC' | 'SIGNAL' | 'INPUT_OUTPUT';
     mode_code: number;
     value: number | null;
     adc_value: number | null;

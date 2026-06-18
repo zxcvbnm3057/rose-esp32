@@ -235,6 +235,12 @@ The single source of truth for all opcodes is the firmware header
 | 0xFD | EVENT_HEARTBEAT | System | timestamp, connection_state |
 | 0xFE | EVENT_ERROR | System | cmd_id, err_code, message |
 
+### GPIO / UART guard semantics
+
+- `CMD_GPIO_SET` must only succeed when the target GPIO is already bound as GPIO and its mode is `OUTPUT` or `INPUT_OUTPUT`.
+- A GPIO currently occupied by a UART `TX/RX` binding must reject `CMD_GPIO_SET`.
+- `CMD_UART_SEND` and `CMD_UART_READ` must reject unbound / incompletely configured UARTs.
+
 ## Reliability: cmd / ack / syn flow
 
 `cmd_id` is the transport-level frame ID used for retransmission matching.

@@ -6,12 +6,12 @@
 cd platform
 
 # Mock 模式（无需 ESP32，使用内存 ASGI 客户端）
-.\.conda\python.exe -m pytest tests/ -v
+..\.conda\python.exe -m pytest tests/ -v
 
 # 真实设备模式（需先启动 platform + ESP32 已连接）
-.\.conda\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+..\.conda\python.exe -m uvicorn src.main:app --host 0.0.0.0 --port 8000 &
 $env:USE_REAL_DEVICE=1
-.\.conda\python.exe -m pytest tests/ -v
+..\.conda\python.exe -m pytest tests/ -v
 ```
 
 ## 测试模式
@@ -73,12 +73,12 @@ $env:USE_REAL_DEVICE=1
 | `test_ws.py` | WS 多客户端/角色权限 + WS 命令 + event_to_dict (BLE 8种 + GPIO/UART) | 19 |
 | `test_pins.py` | Pin Lock CRUD + Expected State + UART 持久化 + WS expected_state | 12 |
 | `test_custom_cmd.py` | 自定义指令 CRUD + 执行 (含结构化 config) | 13 |
-| `test_gpio.py` | GPIO config/set/get/adc + 保留引脚 + 边界 + 错误路径 (404/502/503) | 10 |
+| `test_gpio.py` | GPIO config/set/get/adc + 保留引脚 + 边界 + 错误路径 (404/502/503) + 未绑定/被UART占用拒绝 set | 12 |
 | `test_hardware.py` | 硬件配置 API + 能力检查 + Thread 不支持 | 3 |
 | `test_port.py` | 端口 bind/unbind/status | 3 |
 | `test_signal.py` | 信号 tx/rx/exchange + 边界 + resolution 透传 | 7 |
 | `test_system.py` | 设备状态/ping/heartbeat/sync/thread | 6 |
-| `test_uart.py` | UART config/send/read + base64 编码 | 5 |
+| `test_uart.py` | UART config/send/read + base64 编码 + 未绑定 UART 拒绝 send/read | 7 |
 
 ### 新增覆盖（本轮补充）
 

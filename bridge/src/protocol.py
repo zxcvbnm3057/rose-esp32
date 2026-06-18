@@ -72,6 +72,7 @@ GPIO_MODE_OUTPUT: int = 1
 GPIO_MODE_INTERRUPT: int = 2
 GPIO_MODE_ADC: int = 3
 GPIO_MODE_SIGNAL: int = 4
+GPIO_MODE_INPUT_OUTPUT: int = 5
 
 # Pull modes
 PULL_MODE_NONE: int = 0
@@ -83,13 +84,17 @@ RESOURCE_GPIO: int = 0
 RESOURCE_UART: int = 1
 
 # Error codes
-IOT_ERR_INVALID_ARG: int = 1
-IOT_ERR_INVALID_STATE: int = 2
-IOT_ERR_DRIVER: int = 3
-IOT_ERR_RESOURCE_CONFLICT: int = 4
-IOT_ERR_UNSUPPORTED: int = 5
-IOT_ERR_NOT_FOUND: int = 6
-IOT_ERR_RESOURCE_EXHAUSTED: int = 7
+IOT_ERR_INVALID_ARG: int = 1         # 参数非法 (越界、超出取值范围)
+IOT_ERR_INVALID_STATE: int = 2       # 通用状态错误 (不属于下列细分类的状态问题)
+IOT_ERR_DRIVER: int = 3              # 底层驱动调用失败
+IOT_ERR_RESOURCE_CONFLICT: int = 4   # 资源已被占用 (bind 冲突)
+IOT_ERR_UNSUPPORTED: int = 5         # 硬件/固件不支持该操作
+IOT_ERR_NOT_FOUND: int = 6           # 目标不存在 (设备/资源未找到)
+IOT_ERR_RESOURCE_EXHAUSTED: int = 7  # 资源耗尽 (队列满、通道用尽)
+IOT_ERR_WRONG_MODE: int = 8          # 引脚/资源模式不匹配 (要求特定 mode)
+IOT_ERR_NOT_BOUND: int = 9           # 资源未绑定/未配置
+IOT_ERR_NO_MEM: int = 10             # 内存分配失败
+IOT_ERR_UNKNOWN_CMD: int = 0xFF      # 未知命令 opcode
 
 # UART constants
 UART_NUM_MAX: int = 2
@@ -186,10 +191,12 @@ class CmdGpioSignalTx:
     gpio: int
     signal_len: int
     delay_us: int
+    carrier_hz: int
+    duty_cycle: float
     signal_data: List[Tuple[int, int]]  # List of (level, duration_us)
 
     def to_bytes(self) -> bytes:
-        data = struct.pack('<BHI', self.gpio, self.signal_len, self.delay_us)
+        data = struct.pack('<BHIIf', self.gpio, self.signal_len, self.delay_us, self.carrier_hz, self.duty_cycle)
         for level, duration in self.signal_data:
             data += struct.pack('<BI', level, duration)
         return data
@@ -210,12 +217,23 @@ class CmdGpioSignalExchange:
     gpio: int
     tx_len: int
     delay_us: int
+    carrier_hz: int
+    duty_cycle: float
     rx_total_us: int
     rx_max_edges: int
     tx_signal_data: List[Tuple[int, int]]
 
     def to_bytes(self) -> bytes:
-        data = struct.pack('<BHIIH', self.gpio, self.tx_len, self.delay_us, self.rx_total_us, self.rx_max_edges)
+        data = struct.pack(
+            '<BHIIfIH',
+            self.gpio,
+            self.tx_len,
+            self.delay_us,
+            self.carrier_hz,
+            self.duty_cycle,
+            self.rx_total_us,
+            self.rx_max_edges,
+        )
         for level, duration in self.tx_signal_data:
             data += struct.pack('<BI', level, duration)
         return data
@@ -371,19 +389,20 @@ class EventCmdAck:
 
 @dataclass
 class EventGpioValue:
+    cmd_id: int
     gpio: int
     value: int
     timestamp_us: int
 
     @classmethod
     def from_bytes(cls, data: bytes) -> 'EventGpioValue':
-        fmt = '<BBQ'
+        # Layout (packed): cmd_id(H) gpio(B) value(B) timestamp_us(q)
+        fmt = '<HBBq'
         needed = struct.calcsize(fmt)
         if len(data) < needed:
             raise ValueError(f"EventGpioValue requires {needed} bytes, got {len(data)}")
-        data = data[:needed]
-        gpio, value, timestamp_us = struct.unpack(fmt, data)
-        return cls(gpio, value, timestamp_us)
+        cmd_id, gpio, value, timestamp_us = struct.unpack(fmt, data[:needed])
+        return cls(cmd_id, gpio, value, timestamp_us)
 
 
 @dataclass
@@ -405,27 +424,20 @@ class EventGpioEdge:
 
 @dataclass
 class EventAdcValue:
+    cmd_id: int
     gpio: int
     value: int
     timestamp_us: int
 
     @classmethod
     def from_bytes(cls, data: bytes) -> 'EventAdcValue':
-        if len(data) >= 16:
-            # Compatibility with old firmware ABI padding:
-            # [gpio(1)][pad(1)][value(2)][pad(4)][timestamp(8)]
-            gpio = data[0]
-            value = struct.unpack('<H', data[2:4])[0]
-            timestamp_us = struct.unpack('<q', data[8:16])[0]
-            return cls(gpio, value, timestamp_us)
-
-        fmt = '<BHq'
+        # Layout (packed): cmd_id(H) gpio(B) value(H) timestamp_us(q)
+        fmt = '<HBHq'
         needed = struct.calcsize(fmt)
         if len(data) < needed:
             raise ValueError(f"EventAdcValue requires {needed} bytes, got {len(data)}")
-        data = data[:needed]
-        gpio, value, timestamp_us = struct.unpack(fmt, data)
-        return cls(gpio, value, timestamp_us)
+        cmd_id, gpio, value, timestamp_us = struct.unpack(fmt, data[:needed])
+        return cls(cmd_id, gpio, value, timestamp_us)
 
 
 @dataclass
@@ -436,6 +448,7 @@ class SignalEdge:
 
 @dataclass
 class EventGpioSignalCaptured:
+    cmd_id: int
     gpio: int
     edge_count: int
     timestamp_us: int
@@ -443,14 +456,15 @@ class EventGpioSignalCaptured:
 
     @classmethod
     def from_bytes(cls, data: bytes) -> 'EventGpioSignalCaptured':
-        gpio, edge_count, timestamp_us = struct.unpack('<BHq', data[:11])
+        # Layout (packed): cmd_id(H) gpio(B) edge_count(H) timestamp_us(q)
+        cmd_id, gpio, edge_count, timestamp_us = struct.unpack('<HBHq', data[:13])
         edges = []
-        offset = 11
+        offset = 13
         for i in range(edge_count):
             level, duration_us = struct.unpack('<BI', data[offset:offset + 5])
             edges.append(SignalEdge(level, duration_us))
             offset += 5
-        return cls(gpio, edge_count, timestamp_us, edges)
+        return cls(cmd_id, gpio, edge_count, timestamp_us, edges)
 
 
 @dataclass
@@ -484,6 +498,7 @@ class EventThreadResponse:
 
 @dataclass
 class EventSyncResponse:
+    cmd_id: int
     session_version: int
     pending_cmd_count: int
     pending_thread_count: int
@@ -491,8 +506,9 @@ class EventSyncResponse:
 
     @classmethod
     def from_bytes(cls, data: bytes) -> 'EventSyncResponse':
-        session_version, pending_cmd_count, pending_thread_count, port_status_count = struct.unpack('<IHHH', data[:10])
-        return cls(session_version, pending_cmd_count, pending_thread_count, port_status_count)
+        # Layout (packed): cmd_id(H) session_version(I) pending_cmd(H) pending_thread(H) port_status(H)
+        cmd_id, session_version, pending_cmd_count, pending_thread_count, port_status_count = struct.unpack('<HIHHH', data[:12])
+        return cls(cmd_id, session_version, pending_cmd_count, pending_thread_count, port_status_count)
 
 
 @dataclass
@@ -512,17 +528,17 @@ class EventPortStatus:
 
 @dataclass
 class EventBlePairingEnabled:
+    cmd_id: int
     pin_code: bytes
     timeout_s: int
 
     @classmethod
     def from_bytes(cls, data: bytes) -> 'EventBlePairingEnabled':
-        pin_code = data[:6]
-        if len(data) >= 12:
-            timeout_s = struct.unpack('<I', data[8:12])[0]
-        else:
-            timeout_s = struct.unpack('<I', data[6:10])[0]
-        return cls(pin_code, timeout_s)
+        # Layout (packed): cmd_id(H) pin_code(6s) timeout_s(I)
+        cmd_id = struct.unpack('<H', data[:2])[0]
+        pin_code = data[2:8]
+        timeout_s = struct.unpack('<I', data[8:12])[0]
+        return cls(cmd_id, pin_code, timeout_s)
 
 
 @dataclass
@@ -538,16 +554,19 @@ class EventBlePairingDisabled:
 
 @dataclass
 class EventBlePeersList:
+    cmd_id: int
     peer_count: int
     peers: List[Tuple[bytes, int]]
 
     @classmethod
     def from_bytes(cls, data: bytes) -> 'EventBlePeersList':
-        if len(data) < 1:
-            return cls(0, [])
-        peer_count = data[0]
+        # Layout (packed): cmd_id(H) peer_count(B) then peer_count * (mac(6) rssi(b))
+        if len(data) < 3:
+            return cls(0, 0, [])
+        cmd_id = struct.unpack('<H', data[:2])[0]
+        peer_count = data[2]
         peers: List[Tuple[bytes, int]] = []
-        offset = 1
+        offset = 3
         for _ in range(peer_count):
             if offset + 7 > len(data):
                 break
@@ -555,7 +574,7 @@ class EventBlePeersList:
             rssi = struct.unpack('<b', data[offset + 6:offset + 7])[0]
             peers.append((mac, rssi))
             offset += 7
-        return cls(peer_count, peers)
+        return cls(cmd_id, peer_count, peers)
 
 
 @dataclass

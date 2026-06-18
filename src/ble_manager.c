@@ -400,7 +400,7 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
 /* ================================================================
  *  Application-level pairing control — UNCHANGED
  * ================================================================ */
-void ble_enable_pairing(uint32_t timeout_s)
+void ble_enable_pairing(uint16_t cmd_id, uint32_t timeout_s)
 {
     ble_pairing_enabled = 1;
     ble_pairing_timeout_s = timeout_s;
@@ -409,6 +409,7 @@ void ble_enable_pairing(uint32_t timeout_s)
         ble_pairing_pin[i] = (uint8_t)((esp_timer_get_time() + i) % 10) + '0';
     ESP_LOGI(TAG, "Pairing enabled PIN=%.6s timeout=%us", ble_pairing_pin, timeout_s);
     event_ble_pairing_enabled_t evt = {0};
+    evt.cmd_id = cmd_id;
     memcpy(evt.pin_code, ble_pairing_pin, 6);
     evt.timeout_s = timeout_s;
     send_event(EVENT_BLE_PAIRING_ENABLED, &evt, sizeof(evt));

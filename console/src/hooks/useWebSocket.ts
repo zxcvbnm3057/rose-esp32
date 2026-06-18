@@ -63,12 +63,12 @@ export function useWebSocket() {
                         store.setSyncing(false);
                         if ((msg.resource_type as number) === 0) {
                             const gpio = msg.id as number;
-                            const modes = ['INPUT', 'OUTPUT', 'INTERRUPT', 'ADC', 'SIGNAL'] as const;
+                            const modes = ['INPUT', 'OUTPUT', 'INTERRUPT', 'ADC', 'SIGNAL', 'INPUT_OUTPUT'] as const;
                             const pulls = ['NONE', 'DOWN', 'UP'] as const;
                             const mc = msg.mode as number | undefined;
                             const pc = msg.pull as number | undefined;
                             const u: Record<string, unknown> = { bound: (msg.in_use as number) === 1 };
-                            if (mc != null && mc >= 0 && mc <= 4) { u.mode = modes[mc]; u.mode_code = mc; }
+                            if (mc != null && mc >= 0 && mc <= 5) { u.mode = modes[mc]; u.mode_code = mc; }
                             if (pc != null && pc >= 0 && pc <= 2) { u.pull = pulls[pc]; u.pull_code = pc; }
                             if (msg.edge != null) u.edge = msg.edge as number;
                             if (msg.value != null) u.value = msg.value as number;
@@ -84,12 +84,12 @@ export function useWebSocket() {
                         }
                         break;
                     case 'gpio_value': {
-                        const modes = ['INPUT', 'OUTPUT', 'INTERRUPT', 'ADC', 'SIGNAL'] as const;
+                        const modes = ['INPUT', 'OUTPUT', 'INTERRUPT', 'ADC', 'SIGNAL', 'INPUT_OUTPUT'] as const;
                         const pulls = ['NONE', 'DOWN', 'UP'] as const;
                         const u: Record<string, unknown> = { value: msg.value as number };
                         const mc = msg.mode_code as number | undefined;
                         const pc = msg.pull_code as number | undefined;
-                        if (mc != null && mc >= 0 && mc <= 4) { u.mode = modes[mc]; u.mode_code = mc; }
+                        if (mc != null && mc >= 0 && mc <= 5) { u.mode = modes[mc]; u.mode_code = mc; }
                         if (pc != null && pc >= 0 && pc <= 2) { u.pull = pulls[pc]; u.pull_code = pc; }
                         if (msg.edge != null) u.edge = msg.edge as number;
                         if (msg.bound != null) u.bound = msg.bound as boolean;
@@ -171,7 +171,7 @@ export function useWebSocket() {
                     // ── Sync status events ────────────────────────
                     case 'gpio_status': {
                         const g = msg.gpio as number;
-                        const modes = ['INPUT', 'OUTPUT', 'INTERRUPT', 'ADC', 'SIGNAL'] as const;
+                        const modes = ['INPUT', 'OUTPUT', 'INTERRUPT', 'ADC', 'SIGNAL', 'INPUT_OUTPUT'] as const;
                         const pulls = ['NONE', 'DOWN', 'UP'] as const;
                         const mc = msg.mode as number | undefined;
                         const pc = msg.pull as number | undefined;
@@ -180,7 +180,7 @@ export function useWebSocket() {
                             bound: (msg.in_use as number) === 1,
                             edge: msg.edge as number,
                         };
-                        if (mc != null && mc >= 0 && mc <= 4) { u.mode = modes[mc]; u.mode_code = mc; }
+                        if (mc != null && mc >= 0 && mc <= 5) { u.mode = modes[mc]; u.mode_code = mc; }
                         if (pc != null && pc >= 0 && pc <= 2) { u.pull = pulls[pc]; u.pull_code = pc; }
                         if (msg.adc_raw != null) u.adc_value = msg.adc_raw as number;
                         if (msg.adc_mv != null) u.adc_voltage_mv = msg.adc_mv as number;

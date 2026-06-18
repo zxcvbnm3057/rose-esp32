@@ -17,6 +17,8 @@ async def test_signal_tx(client, mock_bridge, is_real):
     res = await client.post("/api/v1/gpio/5/signal/tx", json={
         "signal": [{"level": 1, "duration_us": 100}, {"level": 0, "duration_us": 200}],
         "delay_us": 0,
+        "carrier_hz": 38000,
+        "duty_cycle": 0.33,
     })
     assert res.status_code == 200
     assert res.json()["success"] is True
@@ -43,10 +45,20 @@ async def test_signal_exchange(client, mock_bridge, is_real):
         await client.post("/api/v1/gpio/5/config", json={"mode": 4})
     res = await client.post("/api/v1/gpio/5/signal/exchange", json={
         "tx_signal": [{"level": 1, "duration_us": 100}],
-        "delay_us": 50, "rx_total_us": 500000, "rx_max_edges": 100,
+        "delay_us": 50, "carrier_hz": 38000, "duty_cycle": 0.33, "rx_total_us": 500000, "rx_max_edges": 100,
     })
     assert res.status_code == 200
     assert res.json()["success"] is True
+
+
+@pytest.mark.anyio
+async def test_signal_tx_invalid_carrier_range(client, mock_bridge):
+    res = await client.post("/api/v1/gpio/5/signal/tx", json={
+        "signal": [{"level": 1, "duration_us": 100}],
+        "carrier_hz": 600000,
+        "duty_cycle": 0.5,
+    })
+    assert res.status_code == 422
 
 
 @pytest.mark.anyio
@@ -67,7 +79,7 @@ async def test_signal_exchange_resolution_passthrough(requested, is_real):
     if is_real:
         pytest.skip("纯透传逻辑，mock 专用")
     from unittest.mock import patch, MagicMock
-    from app.services import bridge_service
+    from src.services import bridge_service
 
     fake_client = MagicMock()
     fake_client.exchange_signals.return_value = []
@@ -78,10 +90,14 @@ async def test_signal_exchange_resolution_passthrough(requested, is_real):
             delay_us=0,
             rx_total_us=500000,
             rx_max_edges=100,
+            carrier_hz=38000,
+            duty_cycle=0.33,
             resolution=requested,
         )
-    # exchange_signals(gpio, tx, delay_us, rx_total_us, rx_max_edges, resolution)
+    # exchange_signals(gpio, tx, delay_us, carrier_hz, duty_cycle, rx_total_us, rx_max_edges, resolution)
     args = fake_client.exchange_signals.call_args.args
+    assert args[3] == 38000
+    assert args[4] == 0.33
     assert args[-1] == requested  # 无 clamp / 无转换
 
 
@@ -92,7 +108,7 @@ async def test_signal_rx_resolution_passthrough(requested, is_real):
     if is_real:
         pytest.skip("纯透传逻辑，mock 专用")
     from unittest.mock import patch, MagicMock
-    from app.services import bridge_service
+    from src.services import bridge_service
 
     fake_client = MagicMock()
     fake_client.receive_signal.return_value = []

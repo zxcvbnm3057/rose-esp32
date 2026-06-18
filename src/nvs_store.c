@@ -258,6 +258,9 @@ static int _nvs_restore_gpio(nvs_handle_t handle)
         case IOT_GPIO_MODE_OUTPUT:
             io_conf.mode = GPIO_MODE_OUTPUT;
             break;
+        case IOT_GPIO_MODE_INPUT_OUTPUT:
+            io_conf.mode = GPIO_MODE_INPUT_OUTPUT;
+            break;
         case IOT_GPIO_MODE_INPUT:
         case IOT_GPIO_MODE_ADC:
         case IOT_GPIO_MODE_SIGNAL:
@@ -275,7 +278,7 @@ static int _nvs_restore_gpio(nvs_handle_t handle)
         io_conf.pull_up_en = (cfgs[i].pull == 2) ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE;
         gpio_config(&io_conf);
 
-        if (cfgs[i].mode == IOT_GPIO_MODE_OUTPUT)
+        if (cfgs[i].mode == IOT_GPIO_MODE_OUTPUT || cfgs[i].mode == IOT_GPIO_MODE_INPUT_OUTPUT)
         {
             gpio_set_level(gpio, cfgs[i].value);
             gpio_table[gpio].value = cfgs[i].value;

@@ -43,7 +43,7 @@ export default function App() {
     (async () => {
       try {
         const res = await api.getLocks();
-        const locks = res.data || [];
+        const locks = res.data?.pins || [];
         const store = useDeviceStore.getState();
         store.setExpectedGpios(locks);
         store.loadLocks(locks.filter((l) => l.locked).map((l) => l.gpio));

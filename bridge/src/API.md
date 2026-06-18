@@ -86,6 +86,7 @@ GPIO_MODE_OUTPUT = 1         # Controlled output
 GPIO_MODE_INTERRUPT = 2      # Edge-triggered interrupt
 GPIO_MODE_ADC = 3            # Analog sampling
 GPIO_MODE_SIGNAL = 4         # Precise timing signal I/O
+GPIO_MODE_INPUT_OUTPUT = 5   # Read/write combined mode
 
 # Resource Types
 RESOURCE_GPIO = 0            # GPIO resource
@@ -122,6 +123,11 @@ CMD_GPIO_SIGNAL_EXCHANGE = 0x16    # TX + delay + RX combined
 CMD_UART_CONFIG = 0x20             # Initialize UART
 CMD_UART_SEND = 0x21               # Send data
 CMD_UART_READ = 0x22               # Read pending data
+
+Guard rules:
+- `CMD_GPIO_SET` is valid only for GPIOs already bound in `OUTPUT` or `INPUT_OUTPUT` mode.
+- GPIOs occupied by UART TX/RX bindings must reject `CMD_GPIO_SET`.
+- `CMD_UART_SEND` / `CMD_UART_READ` require a fully bound UART.
 ```
 
 #### Port/Resource (3 operations)
@@ -242,7 +248,13 @@ class CommandDispatcher:
         """Configure GPIO pin. Returns command ID or None on error."""
 
     def gpio_set(gpio: int, value: int) -> Optional[int]:
-        """Set GPIO output value. Returns command ID or None on error."""
+        """Set GPIO output value.
+
+        Only valid for GPIO resources already bound as GPIO and configured as
+        `OUTPUT` or `INPUT_OUTPUT`. GPIOs currently occupied by UART `TX/RX`
+        bindings must be rejected.
+        Returns command ID or None on error.
+        """
 
     def gpio_get(gpio: int) -> Optional[int]:
         """Get GPIO input value. Returns command ID or None on error."""
@@ -293,10 +305,20 @@ class CommandDispatcher:
         """Configure UART. Returns command ID or None on error."""
 
     def uart_send(uart_id: int, data: bytes) -> Optional[int]:
-        """Send UART data. Returns command ID or None on error."""
+        """Send UART data.
+
+        Only valid for UART resources that are already fully configured/bound.
+        Unbound or partially configured UARTs must be rejected.
+        Returns command ID or None on error.
+        """
 
     def uart_read(uart_id: int, length: int = 256) -> Optional[int]:
-        """Read UART data. Returns command ID or None on error."""
+        """Read UART data.
+
+        Only valid for UART resources that are already fully configured/bound.
+        Unbound or partially configured UARTs must be rejected.
+        Returns command ID or None on error.
+        """
 
     def port_bind(resource_type: int, resource_id: int, 
                   owner_id: int) -> Optional[int]:

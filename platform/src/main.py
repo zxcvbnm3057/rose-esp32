@@ -88,13 +88,21 @@ def _on_bridge_event(event: dict):
                 "value": event["value"],
                 "bound": event["in_use"] == 1,
             }
-            if event.get("adc_raw"):
+            if event.get("adc_raw") is not None:
                 update["adc_value"] = event["adc_raw"]
                 update["adc_voltage_mv"] = event["adc_mv"]
             _update_gpio_cache(gpio, update)
             # Also broadcast as gpio_status to WS
             ws_event = {"type": "gpio_status", **{k: v for k, v in event.items() if k != "type"}}
             asyncio.run_coroutine_threadsafe(manager.broadcast(ws_event), loop)
+        elif etype == "adc_value":
+            gpio = event["gpio"]
+            update = {
+                "adc_value": event["value"],
+                "adc_voltage_mv": event.get("voltage_mv"),
+            }
+            _update_gpio_cache(gpio, update)
+            asyncio.run_coroutine_threadsafe(manager.broadcast(event), loop)
         elif etype == "uart_status":
             _uart_state_cache[event["uart_id"]] = {
                 "uart_id": event["uart_id"],
@@ -124,8 +132,10 @@ def _on_bridge_event(event: dict):
             if "edge" in event:
                 update["edge"] = event["edge"]
             _update_gpio_cache(gpio, update)
+            asyncio.run_coroutine_threadsafe(manager.broadcast(event), loop)
 
         elif etype == "heartbeat":
+            global _last_heartbeat_time
             _last_heartbeat_time = time.time()
 
         else:
@@ -315,12 +325,95 @@ async def _handle_ws_command(ws: WebSocket, msg: dict):
         val = await bridge_service.adc_sample(msg["gpio"], msg.get("samples", 1))
         return {"success": val is not None, "data": {"value": val}}
 
+    async def _cmd_signal_tx() -> dict:
+        ok = await bridge_service.signal_tx(
+            msg["gpio"],
+            msg.get("signal", []),
+            msg.get("delay_us", 0),
+            msg.get("carrier_hz", 0),
+            msg.get("duty_cycle", 0.5),
+        )
+        return {
+            "success": ok,
+            "data": {
+                "gpio": msg.get("gpio"),
+                "edges_sent": len(msg.get("signal", [])),
+                "carrier_hz": msg.get("carrier_hz", 0),
+                "duty_cycle": msg.get("duty_cycle", 0.5),
+            },
+        }
+
+    async def _cmd_signal_rx() -> dict:
+        result = await bridge_service.signal_rx(
+            msg["gpio"],
+            msg.get("timeout_us", 1_000_000),
+            msg.get("max_edges", 100),
+            msg.get("resolution"),
+        )
+        return {
+            "success": result is not None,
+            "data": {
+                "gpio": msg.get("gpio"),
+                "edge_count": len(result or []),
+                "edges": [{"level": lv, "duration_us": dur} for lv, dur in (result or [])],
+            },
+        }
+
+    async def _cmd_signal_exchange() -> dict:
+        result = await bridge_service.signal_exchange(
+            msg["gpio"],
+            msg.get("tx_signal", []),
+            msg.get("delay_us", 0),
+            msg.get("rx_total_us", 500_000),
+            msg.get("rx_max_edges", 100),
+            msg.get("carrier_hz", 0),
+            msg.get("duty_cycle", 0.5),
+            msg.get("resolution"),
+        )
+        return {
+            "success": result is not None,
+            "data": {
+                "gpio": msg.get("gpio"),
+                "edge_count": len(result or []),
+                "carrier_hz": msg.get("carrier_hz", 0),
+                "duty_cycle": msg.get("duty_cycle", 0.5),
+                "edges": [{"level": lv, "duration_us": dur} for lv, dur in (result or [])],
+            },
+        }
+
+    async def _cmd_uart_send() -> dict:
+        import base64
+        if msg.get("data_base64"):
+            data = base64.b64decode(msg["data_base64"])
+        elif msg.get("data") is not None:
+            data = str(msg["data"]).encode(msg.get("encoding", "utf-8"))
+        else:
+            raise ValueError("No data provided")
+        ok = await bridge_service.uart_send(msg["uart_id"], data)
+        return {"success": ok, "data": {"uart_id": msg.get("uart_id"), "bytes_sent": len(data)}}
+
+    async def _cmd_thread_passthrough() -> dict:
+        import base64
+        try:
+            payload_bytes = base64.b64decode(msg["payload"])
+        except Exception:
+            raise ValueError("Invalid base64 payload")
+        ok = await bridge_service.thread_passthrough(
+            msg["device_id"], payload_bytes, msg.get("correlation_id", 0)
+        )
+        return {"success": ok, "data": {"device_id": msg.get("device_id")}}
+
     # Explicit WS command registry: op -> (permission_class, handler)
     # read    : safe for business backends
     # control : mutates hardware state; console only
     command_registry: dict[str, tuple[str, callable]] = {
         "gpio_get": ("read", _cmd_gpio_get),
         "adc_sample": ("read", _cmd_adc_sample),
+        "signal_tx": ("read", _cmd_signal_tx),
+        "signal_rx": ("read", _cmd_signal_rx),
+        "signal_exchange": ("read", _cmd_signal_exchange),
+        "uart_send": ("read", _cmd_uart_send),
+        "thread_passthrough": ("read", _cmd_thread_passthrough),
         "gpio_set": ("control", _cmd_gpio_set),
     }
 
