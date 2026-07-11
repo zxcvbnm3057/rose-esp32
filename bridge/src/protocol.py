@@ -35,9 +35,10 @@ CMD_SYNC_REQUEST: int = 0x01
 CMD_SYN: int = 0x02
 CMD_BLE_ENABLE_PAIRING: int = 0x50
 CMD_BLE_DISABLE_PAIRING: int = 0x51
-CMD_BLE_GET_PEERS: int = 0x52
+CMD_BLE_GET_IN_RANGE: int = 0x52
 CMD_BLE_START_SCAN: int = 0x53
 CMD_BLE_STOP_SCAN: int = 0x54
+CMD_BLE_DELETE_BOND: int = 0x55
 CMD_HEARTBEAT: int = 0xFE
 CMD_PING: int = 0xFF
 
@@ -53,9 +54,9 @@ EVENT_THREAD_RESPONSE: int = 0x40
 EVENT_PORT_STATUS: int = 0x50
 EVENT_BLE_PAIRING_ENABLED: int = 0x60
 EVENT_BLE_PAIRING_DISABLED: int = 0x61
-EVENT_BLE_PEER_CONNECTED: int = 0x62
-EVENT_BLE_PEER_DISCONNECTED: int = 0x63
-EVENT_BLE_PEERS_LIST: int = 0x64
+EVENT_BLE_DEVICE_IN_RANGE: int = 0x62
+EVENT_BLE_DEVICE_OUT_OF_RANGE: int = 0x63
+EVENT_BLE_IN_RANGE_LIST: int = 0x64
 EVENT_BLE_RSSI: int = 0x65
 EVENT_ERROR: int = 0xFE
 EVENT_HEARTBEAT: int = 0xFD
@@ -352,7 +353,7 @@ class CmdBleDisablePairing:
 
 
 @dataclass
-class CmdBleGetPeers:
+class CmdBleGetInRange:
     pass
 
     def to_bytes(self) -> bytes:
@@ -371,6 +372,16 @@ class CmdBleStartScan:
 class CmdBleStopScan:
     def to_bytes(self) -> bytes:
         return b''
+
+
+@dataclass
+class CmdBleDeleteBond:
+    device_mac: bytes
+
+    def to_bytes(self) -> bytes:
+        if len(self.device_mac) != 6:
+            raise ValueError("BLE device MAC must be 6 bytes")
+        return self.device_mac
 
 
 # Event structures
@@ -553,65 +564,65 @@ class EventBlePairingDisabled:
 
 
 @dataclass
-class EventBlePeersList:
+class EventBleInRangeList:
     cmd_id: int
-    peer_count: int
-    peers: List[Tuple[bytes, int]]
+    device_count: int
+    devices: List[Tuple[bytes, int]]
 
     @classmethod
-    def from_bytes(cls, data: bytes) -> 'EventBlePeersList':
-        # Layout (packed): cmd_id(H) peer_count(B) then peer_count * (mac(6) rssi(b))
+    def from_bytes(cls, data: bytes) -> 'EventBleInRangeList':
+        # Layout (packed): cmd_id(H) device_count(B) then device_count * (mac(6) rssi(b))
         if len(data) < 3:
             return cls(0, 0, [])
         cmd_id = struct.unpack('<H', data[:2])[0]
-        peer_count = data[2]
-        peers: List[Tuple[bytes, int]] = []
+        device_count = data[2]
+        devices: List[Tuple[bytes, int]] = []
         offset = 3
-        for _ in range(peer_count):
+        for _ in range(device_count):
             if offset + 7 > len(data):
                 break
             mac = data[offset:offset + 6]
             rssi = struct.unpack('<b', data[offset + 6:offset + 7])[0]
-            peers.append((mac, rssi))
+            devices.append((mac, rssi))
             offset += 7
-        return cls(cmd_id, peer_count, peers)
+        return cls(cmd_id, device_count, devices)
 
 
 @dataclass
-class EventBlePeerConnected:
-    peer_mac: bytes
+class EventBleDeviceInRange:
+    device_mac: bytes
     rssi: int
 
     @classmethod
-    def from_bytes(cls, data: bytes) -> 'EventBlePeerConnected':
-        peer_mac = data[:6]
+    def from_bytes(cls, data: bytes) -> 'EventBleDeviceInRange':
+        device_mac = data[:6]
         rssi = struct.unpack('<b', data[6:7])[0]
-        return cls(peer_mac, rssi)
+        return cls(device_mac, rssi)
 
 
 @dataclass
-class EventBlePeerDisconnected:
-    peer_mac: bytes
+class EventBleDeviceOutOfRange:
+    device_mac: bytes
     reason: int
 
     @classmethod
-    def from_bytes(cls, data: bytes) -> 'EventBlePeerDisconnected':
-        peer_mac = data[:6]
+    def from_bytes(cls, data: bytes) -> 'EventBleDeviceOutOfRange':
+        device_mac = data[:6]
         reason = data[6] if len(data) > 6 else 0
-        return cls(peer_mac, reason)
+        return cls(device_mac, reason)
 
 
 @dataclass
 class EventBleRssi:
-    peer_mac: bytes
+    device_mac: bytes
     rssi: int
     timestamp_us: int
 
     @classmethod
     def from_bytes(cls, data: bytes) -> 'EventBleRssi':
-        peer_mac = data[:6]
+        device_mac = data[:6]
         rssi, timestamp_us = struct.unpack('<bq', data[6:15])
-        return cls(peer_mac, rssi, timestamp_us)
+        return cls(device_mac, rssi, timestamp_us)
 
 
 @dataclass
@@ -695,11 +706,11 @@ class EventGpioStatus:
 class EventBleStatus:
     pairing_enabled: int
     scan_enabled: int
-    peer_count: int
+    device_count: int
     pairing_timeout_s: int
 
     @classmethod
     def from_bytes(cls, data: bytes) -> 'EventBleStatus':
-        pairing_enabled, scan_enabled, peer_count, pairing_timeout_s = \
+        pairing_enabled, scan_enabled, device_count, pairing_timeout_s = \
             struct.unpack('<BBBI', data[:7])
-        return cls(pairing_enabled, scan_enabled, peer_count, pairing_timeout_s)
+        return cls(pairing_enabled, scan_enabled, device_count, pairing_timeout_s)

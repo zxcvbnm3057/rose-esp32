@@ -33,14 +33,38 @@ async def ble_disable_pairing():
     return ApiResponse(success=True, data={"pairing_disabled": ok}, timestamp=time.time())
 
 
-@router.get("/peers")
-async def ble_get_peers():
+@router.delete("/paired-devices/{mac:path}")
+async def delete_ble_paired_device(mac: str):
+    """Delete a BLE bond from firmware and its display name from the database."""
     if not get_capabilities().get("ble", False):
         raise HTTPException(status_code=501, detail="BLE not supported")
     check_connected()
-    peers = await bridge_service.ble_get_peers()
-    check_bridge_ok(peers, "BLE peer query failed")
-    return ApiResponse(success=True, data={"peers": peers or []}, timestamp=time.time())
+    try:
+        device_mac = bytes.fromhex(mac.replace(":", "").replace("-", ""))[::-1]
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Invalid BLE MAC address") from exc
+    if len(device_mac) != 6:
+        raise HTTPException(status_code=422, detail="Invalid BLE MAC address")
+
+    ok = await bridge_service.ble_delete_bond(device_mac)
+    check_bridge_ok(ok, "BLE bond deletion failed")
+    async with async_session() as session:
+        result = await session.execute(select(BleDeviceName).where(BleDeviceName.mac == mac))
+        existing = result.scalar_one_or_none()
+        if existing:
+            await session.delete(existing)
+            await session.commit()
+    return ApiResponse(success=True, data={"mac": mac, "deleted": True}, timestamp=time.time())
+
+
+@router.get("/in-range")
+async def ble_get_in_range():
+    if not get_capabilities().get("ble", False):
+        raise HTTPException(status_code=501, detail="BLE not supported")
+    check_connected()
+    devices = await bridge_service.ble_get_in_range()
+    check_bridge_ok(devices, "BLE in-range query failed")
+    return ApiResponse(success=True, data={"devices": devices or []}, timestamp=time.time())
 
 
 @router.post("/scan/start")

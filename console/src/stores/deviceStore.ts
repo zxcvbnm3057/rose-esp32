@@ -7,7 +7,7 @@ export interface UartGpioInfo {
     role: 'tx' | 'rx';
 }
 
-export interface BlePeer {
+export interface BleDevice {
     mac: string;
     rssi: number;
 }
@@ -15,7 +15,7 @@ export interface BlePeer {
 export interface BleState {
     pairingEnabled: boolean;
     scanEnabled: boolean;
-    peerCount: number;
+    deviceCount: number;
 }
 
 export interface EdgeEvent {
@@ -80,10 +80,10 @@ interface DeviceStore {
     // BLE
     bleState: BleState;
     setBleState: (partial: Partial<BleState>) => void;
-    blePeers: BlePeer[];
-    setBlePeers: (peers: BlePeer[]) => void;
-    upsertBlePeer: (mac: string, rssi: number) => void;
-    removeBlePeer: (mac: string) => void;
+    bleDevices: BleDevice[];
+    setBleDevices: (devices: BleDevice[]) => void;
+    upsertBleDevice: (mac: string, rssi: number) => void;
+    removeBleDevice: (mac: string) => void;
 
     // Expected state from user config (persisted via API)
     expectedGpios: { gpio: number; locked: boolean; expected_mode?: number; expected_value?: number }[];
@@ -188,23 +188,23 @@ export const useDeviceStore = create<DeviceStore>((set) => ({
     clearUartMessages: () => set({ uartMessages: [] }),
 
     // BLE
-    bleState: { pairingEnabled: false, scanEnabled: false, peerCount: 0 },
+    bleState: { pairingEnabled: false, scanEnabled: false, deviceCount: 0 },
     setBleState: (partial) =>
         set((s) => ({ bleState: { ...s.bleState, ...partial } })),
-    blePeers: [],
-    setBlePeers: (peers) => set({ blePeers: peers }),
-    upsertBlePeer: (mac, rssi) =>
+    bleDevices: [],
+    setBleDevices: (devices) => set({ bleDevices: devices }),
+    upsertBleDevice: (mac, rssi) =>
         set((s) => {
-            const idx = s.blePeers.findIndex((p) => p.mac === mac);
+            const idx = s.bleDevices.findIndex((p) => p.mac === mac);
             if (idx >= 0) {
-                const updated = [...s.blePeers];
+                const updated = [...s.bleDevices];
                 updated[idx] = { mac, rssi };
-                return { blePeers: updated };
+                return { bleDevices: updated };
             }
-            return { blePeers: [...s.blePeers, { mac, rssi }] };
+            return { bleDevices: [...s.bleDevices, { mac, rssi }] };
         }),
-    removeBlePeer: (mac) =>
-        set((s) => ({ blePeers: s.blePeers.filter((p) => p.mac !== mac) })),
+    removeBleDevice: (mac) =>
+        set((s) => ({ bleDevices: s.bleDevices.filter((p) => p.mac !== mac) })),
 
     // Expected state + mismatch
     expectedGpios: [],

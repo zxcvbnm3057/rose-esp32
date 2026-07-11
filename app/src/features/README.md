@@ -216,9 +216,9 @@ async def handle(context: FeatureContext) -> None:
 FEATURE = FeatureSpec(
     name="home_presence",
     subscriptions=[
-        EventSubscription.platform("ble_peer_connected", handler=handle_peer_connected),
-        EventSubscription.platform("ble_peer_disconnected", handler=handle_peer_disconnected),
-        EventSubscription.platform("ble_peers_list", handler=handle_peers_list),
+        EventSubscription.platform("ble_device_in_range", handler=handle_device_in_range),
+        EventSubscription.platform("ble_device_out_of_range", handler=handle_device_out_of_range),
+        EventSubscription.platform("ble_in_range_list", handler=handle_in_range_list),
     ],
 )
 ```

@@ -175,8 +175,8 @@ class PlatformClient:
             payload["encoding"] = encoding
         return await self._request("POST", f"/api/v1/uart/{uart_id}/send", json=payload)
 
-    async def ble_get_peers(self) -> dict[str, Any]:
-        return await self._request("GET", "/api/v1/ble/peers")
+    async def ble_get_in_range(self) -> dict[str, Any]:
+        return await self._request("GET", "/api/v1/ble/in-range")
 
     async def ble_get_device_names(self) -> dict[str, Any]:
         return await self._request("GET", "/api/v1/ble/device-names")

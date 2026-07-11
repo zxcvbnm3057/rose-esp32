@@ -216,7 +216,7 @@ def test_ble_status_parse():
     ev = EventBleStatus.from_bytes(data)
     assert ev.pairing_enabled == 1
     assert ev.scan_enabled == 0
-    assert ev.peer_count == 2
+    assert ev.device_count == 2
     assert ev.pairing_timeout_s == 60
 
 

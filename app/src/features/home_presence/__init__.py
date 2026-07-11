@@ -1,13 +1,13 @@
-"""家居在场感知 feature（基于蓝牙 peer 连接状态）。
+"""家居在场感知 feature（基于蓝牙区域内设备状态）。
 
 功能：
-- 订阅平台 BLE 事件，跟踪当前已连接的蓝牙 peer 集合：
-    - `ble_peers_list`     ：全量 peer 列表（覆盖式刷新）
-    - `ble_peer_connected` ：单个 peer 接入
-    - `ble_peer_disconnected`：单个 peer 断开
-- 蓝牙连接清空时记录时间戳；由一个 cron 定时器周期性检测，
-  当"无任何 peer"持续超过 `AWAY_DELAY_S` 后，发布内部事件 `home.away`（离家）
-- 当蓝牙重新接入（从离家状态恢复）时，发布内部事件 `home.arrive`（回家）
+- 订阅平台 BLE 事件，跟踪当前区域内的蓝牙设备集合：
+    - `ble_in_range_list`       ：全量在场设备列表（覆盖式刷新）
+    - `ble_device_in_range`     ：单个设备进入区域（已连接心跳 或 iOS 广播命中）
+    - `ble_device_out_of_range` ：单个设备离开区域（在场超时）
+- 在场设备清空时记录时间戳；由一个 cron 定时器周期性检测，
+  当"无任何在场设备"持续超过 `AWAY_DELAY_S` 后，发布内部事件 `home.away`（离家）
+- 当蓝牙设备重新进入区域（从离家状态恢复）时，发布内部事件 `home.arrive`（回家）
 
 发布的内部事件（供其它 feature 订阅）：
 - `home.away`  ：离家。light 关闭所有灯光，ac 关闭所有空调
@@ -55,10 +55,10 @@ class PresenceState:
     同一 feature 的 handler 由调度器串行执行，故无需加锁。
     """
 
-    peers: set[str] = field(default_factory=set)
+    devices: set[str] = field(default_factory=set)
     # True 表示当前处于"已离家"状态
     is_away: bool = False
-    # 蓝牙清空那一刻的单调时间戳；有 peer 或已离家时为 None
+    # 在场设备清空那一刻的单调时间戳；有设备或已离家时为 None
     empty_since: float = _now()
 
 
@@ -72,69 +72,69 @@ def _mac_of(item: object) -> str | None:
 
 
 def _mark_present() -> None:
-    """有 peer 在场：清掉空连接时间戳。"""
+    """有设备在场：清掉空在场时间戳。"""
     _state.empty_since = None
 
 
 def _mark_empty_if_needed() -> None:
-    """无 peer：首次清空时记录时间戳（已离家则不再重复记录）。"""
-    if _state.peers or _state.is_away:
+    """无在场设备：首次清空时记录时间戳（已离家则不再重复记录）。"""
+    if _state.devices or _state.is_away:
         _state.empty_since = None
         return
     if _state.empty_since is None:
         _state.empty_since = _now()
 
 
-async def _on_peer_present(context: FeatureContext) -> None:
-    """有 peer 接入：清空时间戳；若此前已离家则发布回家事件。"""
+async def _on_device_present(context: FeatureContext) -> None:
+    """有设备进入区域：清空时间戳；若此前已离家则发布回家事件。"""
     _mark_present()
     if _state.is_away:
         _state.is_away = False
-        logger.info("home presence: BLE peer back, emitting %s", EVENT_HOME_ARRIVE)
+        logger.info("home presence: BLE device back in range, emitting %s", EVENT_HOME_ARRIVE)
         await context.emit_event(EVENT_HOME_ARRIVE, {"reason": "ble_reconnect"})
 
 
-async def handle_peers_list(context: FeatureContext) -> None:
-    """全量 peer 列表，覆盖式刷新当前在场集合。"""
-    raw_peers = context.activation.payload.get("peers") or []
-    macs = {mac for mac in (_mac_of(item) for item in raw_peers) if mac}
-    _state.peers = macs
-    logger.info("home presence: peers_list -> %d peer(s)", len(macs))
+async def handle_in_range_list(context: FeatureContext) -> None:
+    """全量在场设备列表，覆盖式刷新当前在场集合。"""
+    raw_devices = context.activation.payload.get("devices") or []
+    macs = {mac for mac in (_mac_of(item) for item in raw_devices) if mac}
+    _state.devices = macs
+    logger.info("home presence: in_range_list -> %d device(s)", len(macs))
     if macs:
-        await _on_peer_present(context)
+        await _on_device_present(context)
     else:
         _mark_empty_if_needed()
 
 
-async def handle_peer_connected(context: FeatureContext) -> None:
-    """单个 peer 接入。"""
+async def handle_device_in_range(context: FeatureContext) -> None:
+    """单个设备进入区域。"""
     mac = _mac_of(context.activation.payload)
     if mac:
-        _state.peers.add(mac)
-    logger.info("home presence: peer_connected mac=%s total=%d", mac, len(_state.peers))
-    await _on_peer_present(context)
+        _state.devices.add(mac)
+    logger.info("home presence: device_in_range mac=%s total=%d", mac, len(_state.devices))
+    await _on_device_present(context)
 
 
-async def handle_peer_disconnected(context: FeatureContext) -> None:
-    """单个 peer 断开。若清空则记录时间戳。"""
+async def handle_device_out_of_range(context: FeatureContext) -> None:
+    """单个设备离开区域。若清空则记录时间戳。"""
     mac = _mac_of(context.activation.payload)
     if mac:
-        _state.peers.discard(mac)
-    logger.info("home presence: peer_disconnected mac=%s total=%d", mac, len(_state.peers))
-    if not _state.peers:
+        _state.devices.discard(mac)
+    logger.info("home presence: device_out_of_range mac=%s total=%d", mac, len(_state.devices))
+    if not _state.devices:
         _mark_empty_if_needed()
 
 
 async def handle_presence_check(context: FeatureContext) -> None:
-    """cron 巡检：无 peer 持续超过 AWAY_DELAY_S 即判定离家。"""
-    if _state.peers or _state.is_away or _state.empty_since is None:
+    """cron 巡检：无在场设备持续超过 AWAY_DELAY_S 即判定离家。"""
+    if _state.devices or _state.is_away or _state.empty_since is None:
         return
     elapsed = _now() - _state.empty_since
     if elapsed < AWAY_DELAY_S:
         return
     _state.is_away = True
     _state.empty_since = None
-    logger.info("home presence: no BLE peer for %.0fs, emitting %s", elapsed, EVENT_HOME_AWAY)
+    logger.info("home presence: no BLE device for %.0fs, emitting %s", elapsed, EVENT_HOME_AWAY)
     await context.emit_event(EVENT_HOME_AWAY, {"reason": "ble_empty_timeout"})
 
 
@@ -143,19 +143,19 @@ FEATURE = FeatureSpec(
     enabled=ENABLED,
     subscriptions=[
         EventSubscription.platform(
-            "ble_peers_list",
+            "ble_in_range_list",
             DeliveryMode.QUEUE,
-            handler=handle_peers_list,
+            handler=handle_in_range_list,
         ),
         EventSubscription.platform(
-            "ble_peer_connected",
+            "ble_device_in_range",
             DeliveryMode.QUEUE,
-            handler=handle_peer_connected,
+            handler=handle_device_in_range,
         ),
         EventSubscription.platform(
-            "ble_peer_disconnected",
+            "ble_device_out_of_range",
             DeliveryMode.QUEUE,
-            handler=handle_peer_disconnected,
+            handler=handle_device_out_of_range,
         ),
         EventSubscription.timer(
             event_type="home_presence.check",

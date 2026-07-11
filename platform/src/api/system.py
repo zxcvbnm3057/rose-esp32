@@ -15,7 +15,7 @@ async def get_device_status():
     connected = bridge_service.is_connected()
     return ApiResponse(success=True, data={
         "connected": connected,
-        "io_snapshot": {"gpios": [], "uarts": [], "ble": {"pairing_enabled": False, "scan_enabled": False, "peer_count": 0}},
+        "io_snapshot": {"gpios": [], "uarts": [], "ble": {"pairing_enabled": False, "scan_enabled": False, "device_count": 0}},
     }, timestamp=time.time())
 
 

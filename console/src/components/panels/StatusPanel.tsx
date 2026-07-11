@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Trash2 } from 'lucide-react';
 import { useDeviceStore } from '../../stores/deviceStore';
 import { api } from '../../services/api';
 
@@ -10,8 +11,8 @@ export function StatusPanel() {
   const connected = useDeviceStore((s) => s.connected);
   const uartStates = useDeviceStore((s) => s.uartStates);
   const bleState = useDeviceStore((s) => s.bleState);
-  const blePeers = useDeviceStore((s) => s.blePeers);
-  const setBlePeers = useDeviceStore((s) => s.setBlePeers);
+  const bleDevices = useDeviceStore((s) => s.bleDevices);
+  const setBleDevices = useDeviceStore((s) => s.setBleDevices);
   const config = useDeviceStore((s) => s.hardwareConfig);
   const mismatchPins = useDeviceStore((s) => s.mismatchPins);
   const updateUart = useDeviceStore((s) => s.updateUart);
@@ -29,6 +30,8 @@ export function StatusPanel() {
   const [deviceNames, setDeviceNames] = useState<Record<string, string>>({});
   const [editingMac, setEditingMac] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const pendingDeletedMac = useRef<string | null>(null);
+  const bleDeviceMacs = bleDevices.map((device) => device.mac).sort().join(',');
 
   // Load device names from platform
   const loadDeviceNames = useCallback(async () => {
@@ -44,21 +47,28 @@ export function StatusPanel() {
 
   useEffect(() => { loadDeviceNames(); }, [loadDeviceNames]);
 
+  useEffect(() => {
+    const mac = pendingDeletedMac.current;
+    if (!mac || bleDevices.some((device) => device.mac === mac)) return;
+    pendingDeletedMac.current = null;
+    loadDeviceNames();
+  }, [bleDeviceMacs, bleDevices, loadDeviceNames]);
+
   // Sync pairing code display with BLE state
   useEffect(() => {
     if (!bleState.pairingEnabled) setPairingCode(null);
   }, [bleState.pairingEnabled]);
 
-  const refreshPeers = useCallback(async () => {
+  const refreshDevices = useCallback(async () => {
     try {
-      const res = await api.blePeers() as { data: { peers: { mac: string; rssi: number }[] } };
-      setBlePeers(res.data.peers || []);
+      const res = await api.bleInRange() as { data: { devices: { mac: string; rssi: number }[] } };
+      setBleDevices(res.data.devices || []);
       useDeviceStore.getState().setBleState({
         ...useDeviceStore.getState().bleState,
-        peerCount: (res.data.peers || []).length,
+        deviceCount: (res.data.devices || []).length,
       });
     } catch { /* ignore */ }
-  }, [setBlePeers]);
+  }, [setBleDevices]);
 
   const handleEnablePairing = async () => {
     try {
@@ -91,6 +101,17 @@ export function StatusPanel() {
       addHistory({ time: now(), op: 'BLE 设备名', result: `✓ ${mac} → ${editName.trim()}` });
     } catch (e: unknown) {
       addHistory({ time: now(), op: 'BLE 设备名', result: '✗ ' + (e as Error).message });
+    }
+  };
+
+  const handleDeletePairedDevice = async (mac: string) => {
+    if (!confirm(`确认删除已配对设备 ${getDisplayName(mac)}？\n设备需要重新配对后才能再次使用。`)) return;
+    try {
+      await api.deleteBlePairedDevice(mac);
+      pendingDeletedMac.current = mac;
+      addHistory({ time: now(), op: 'BLE 删除配对', result: `✓ ${mac}` });
+    } catch (e: unknown) {
+      addHistory({ time: now(), op: 'BLE 删除配对', result: '✗ ' + (e as Error).message });
     }
   };
 
@@ -173,8 +194,8 @@ export function StatusPanel() {
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-gray-500">已连接设备</span>
-            <span className="text-white font-mono">{blePeers.length}</span>
+            <span className="text-gray-500">范围内设备</span>
+            <span className="text-white font-mono">{bleDevices.length}</span>
           </div>
 
           {/* Pairing controls - only one button */}
@@ -192,11 +213,11 @@ export function StatusPanel() {
                 onClick={handleDisablePairing}
                 className="flex-1 py-1.5 bg-red-800 hover:bg-red-700 rounded text-xs"
               >
-                {pairingCode ? `停用配对 (${pairingCode})` : '停用配对'}
+                停用配对
               </button>
             )}
             <button
-              onClick={refreshPeers}
+              onClick={refreshDevices}
               className="py-1.5 px-2 bg-gray-700 hover:bg-gray-600 rounded text-xs"
               title="刷新设备列表"
             >
@@ -214,13 +235,13 @@ export function StatusPanel() {
             </div>
           )}
 
-          {/* Peers list with rename */}
+          {/* In-range devices */}
           <div className="text-xs text-gray-500 max-h-48 overflow-y-auto border-t border-gray-700 pt-1.5">
-            <div className="text-gray-600 mb-1">已连接设备</div>
-            {blePeers.length === 0 ? (
-              <div className="italic text-gray-700 py-1">暂无已连接设备</div>
+            <div className="text-gray-600 mb-1">范围内设备</div>
+            {bleDevices.length === 0 ? (
+              <div className="italic text-gray-700 py-1">暂无范围内设备</div>
             ) : (
-              blePeers.map((p, i) => (
+              bleDevices.map((p, i) => (
                 <div key={i} className="py-1 border-b border-gray-700 last:border-0">
                   {editingMac === p.mac ? (
                     <div className="flex gap-1">
@@ -239,7 +260,7 @@ export function StatusPanel() {
                   ) : (
                     <div className="flex items-center justify-between group">
                       <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" title="已连接" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" title="在范围内" />
                         <span className="text-gray-300 truncate" title={p.mac}>
                           {getDisplayName(p.mac)}
                         </span>
@@ -251,6 +272,14 @@ export function StatusPanel() {
                           title="重命名"
                         >
                           ✏️
+                        </button>
+                        <button
+                          onClick={() => handleDeletePairedDevice(p.mac)}
+                          className="w-6 h-6 inline-flex items-center justify-center rounded border border-transparent text-gray-500 hover:text-red-400 hover:bg-red-950/50 hover:border-red-900/60 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-colors"
+                          title="删除配对"
+                          aria-label={`删除配对设备 ${getDisplayName(p.mac)}`}
+                        >
+                          <Trash2 size={13} strokeWidth={1.8} />
                         </button>
                         <span className={p.rssi > -50 ? 'text-green-400' : p.rssi > -70 ? 'text-yellow-400' : 'text-red-400'}>
                           {p.rssi}dBm

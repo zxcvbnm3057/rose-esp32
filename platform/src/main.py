@@ -116,8 +116,8 @@ def _on_bridge_event(event: dict):
         elif etype == "ble_status":
             ws_event = {"type": "ble_status", **{k: v for k, v in event.items() if k != "type"}}
             asyncio.run_coroutine_threadsafe(manager.broadcast(ws_event), loop)
-        elif etype in ("ble_pairing_enabled", "ble_pairing_disabled", "ble_peers_list",
-                       "ble_peer_connected", "ble_peer_disconnected", "ble_rssi"):
+        elif etype in ("ble_pairing_enabled", "ble_pairing_disabled", "ble_in_range_list",
+                       "ble_device_in_range", "ble_device_out_of_range", "ble_rssi"):
             # 纯透传 — 设备是唯一真相源，后端不缓存
             ws_event = {"type": etype, **{k: v for k, v in event.items() if k != "type"}}
             asyncio.run_coroutine_threadsafe(manager.broadcast(ws_event), loop)
@@ -181,8 +181,8 @@ async def _sync_device_state(delay: float = 0.5):
     # 同步 BLE 设备列表（设备是唯一真相源）
     try:
         await asyncio.sleep(0.5)
-        await bridge_service.ble_get_peers()
-        # — ESP32 返回 EVENT_BLE_PEERS_LIST → WS 透传
+        await bridge_service.ble_get_in_range()
+        # — ESP32 返回 EVENT_BLE_IN_RANGE_LIST → WS 透传
     except Exception:
         pass
 

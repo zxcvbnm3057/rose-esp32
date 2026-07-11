@@ -12,11 +12,11 @@ import pytest
 
 from ..src import (
     IoTAgentClient,
-    EVENT_BLE_PEER_CONNECTED,
-    EVENT_BLE_PEER_DISCONNECTED,
+    EVENT_BLE_DEVICE_IN_RANGE,
+    EVENT_BLE_DEVICE_OUT_OF_RANGE,
     EVENT_BLE_PAIRING_ENABLED,
     EVENT_BLE_PAIRING_DISABLED,
-    EVENT_BLE_PEERS_LIST,
+    EVENT_BLE_IN_RANGE_LIST,
     EVENT_BLE_RSSI,
 )
 
@@ -70,18 +70,18 @@ class TestBlePeers:
         finally:
             client.stop()
 
-    def test_peer_list_returns_valid_structure(self, client):
-        """Get BLE peers list and verify response structure."""
-        peers = client.get_ble_peers()
-        assert peers is not None, "No peer list response"
-        assert isinstance(peers, list)
+    def test_in_range_list_returns_valid_structure(self, client):
+        """Get BLE in-range device list and verify response structure."""
+        devices = client.get_ble_in_range()
+        assert devices is not None, "No in-range list response"
+        assert isinstance(devices, list)
 
-        for peer in peers:
-            assert 'mac' in peer
-            assert 'rssi' in peer
-            assert isinstance(peer['mac'], bytes)
-            assert len(peer['mac']) == 6
-            assert isinstance(peer['rssi'], int)
+        for dev in devices:
+            assert 'mac' in dev
+            assert 'rssi' in dev
+            assert isinstance(dev['mac'], bytes)
+            assert len(dev['mac']) == 6
+            assert isinstance(dev['rssi'], int)
 
     def test_rssi_scan_start_and_event_cadence(self, client):
         """Start RSSI scan and verify EVENT_BLE_RSSI arrives periodically."""
@@ -107,10 +107,10 @@ class TestBlePeers:
         # RSSI may or may not arrive (depends on BLE environment)
         # Just verify any received events have correct structure
         for evt in rssi_events:
-            assert hasattr(evt, 'peer_mac')
+            assert hasattr(evt, 'device_mac')
             assert hasattr(evt, 'rssi')
             assert hasattr(evt, 'timestamp_us')
-            assert len(evt.peer_mac) == 6
+            assert len(evt.device_mac) == 6
             assert evt.timestamp_us > 0
 
 
@@ -125,16 +125,18 @@ class TestBleConnectDisconnect:
     """End-to-end BLE connect/disconnect tests using this PC's Bluetooth.
 
     The PC BLE central pairs with the ESP32 peripheral using the firmware's
-    PIN, then the TCP bridge verifies EVENT_BLE_PEER_CONNECTED /
-    EVENT_BLE_PEER_DISCONNECTED.
+    PIN, then the TCP bridge verifies EVENT_BLE_DEVICE_IN_RANGE /
+    EVENT_BLE_DEVICE_OUT_OF_RANGE.
 
     Pairing is FULLY AUTOMATED: the firmware returns its 6-digit PIN over the
     TCP bridge (EVENT_BLE_PAIRING_ENABLED), and BleTestHelper.pair_with_pin
     injects it through the Windows Runtime custom-pairing API
     (accept_with_pin) so no Windows PIN dialog ever appears.
 
-    The firmware emits EVENT_BLE_PEER_CONNECTED only after BLE *encryption*
+    The firmware emits EVENT_BLE_DEVICE_IN_RANGE only after BLE *encryption*
     succeeds (BLE_GAP_EVENT_ENC_CHANGE), so each connect test pairs first.
+    OUT_OF_RANGE is emitted when presence times out (IN_RANGE_TIMEOUT_S),
+    not immediately on disconnect, so waits below allow for that window.
     """
 
     @pytest.fixture
@@ -175,44 +177,46 @@ class TestBleConnectDisconnect:
         assert ble.pair_with_pin(pin, timeout=25.0), (
             f"Automated PIN pairing to {addr} failed")
 
-    def test_connect_triggers_peer_connected_event(self, client, ble):
-        """PC pairs via BLE → ESP32 sends EVENT_BLE_PEER_CONNECTED over TCP."""
+    def test_connect_triggers_device_in_range_event(self, client, ble):
+        """PC pairs via BLE → ESP32 sends EVENT_BLE_DEVICE_IN_RANGE over TCP."""
         self._pair(client, ble)
-        evt = client.events.wait_for_event(EVENT_BLE_PEER_CONNECTED, timeout=8.0)
-        assert evt is not None, "EVENT_BLE_PEER_CONNECTED not received over TCP"
-        assert hasattr(evt, 'peer_mac') and len(evt.peer_mac) == 6
+        evt = client.events.wait_for_event(EVENT_BLE_DEVICE_IN_RANGE, timeout=8.0)
+        assert evt is not None, "EVENT_BLE_DEVICE_IN_RANGE not received over TCP"
+        assert hasattr(evt, 'device_mac') and len(evt.device_mac) == 6
         assert hasattr(evt, 'rssi')
 
-    def test_disconnect_triggers_peer_disconnected_event(self, client, ble):
-        """PC disconnects BLE → ESP32 sends EVENT_BLE_PEER_DISCONNECTED."""
+    def test_disconnect_triggers_device_out_of_range_event(self, client, ble):
+        """PC unpairs BLE → device stops advertising → ESP32 emits
+        EVENT_BLE_DEVICE_OUT_OF_RANGE once presence times out."""
         self._pair(client, ble)
-        _ = client.events.wait_for_event(EVENT_BLE_PEER_CONNECTED, timeout=8.0)
+        _ = client.events.wait_for_event(EVENT_BLE_DEVICE_IN_RANGE, timeout=8.0)
         assert ble.unpair()  # unpair drops the encrypted link
-        evt = client.events.wait_for_event(EVENT_BLE_PEER_DISCONNECTED, timeout=8.0)
-        assert evt is not None, "EVENT_BLE_PEER_DISCONNECTED not received"
-        assert hasattr(evt, 'peer_mac') and hasattr(evt, 'reason')
+        # OUT_OF_RANGE fires on the presence-timeout window, not instantly.
+        evt = client.events.wait_for_event(EVENT_BLE_DEVICE_OUT_OF_RANGE, timeout=20.0)
+        assert evt is not None, "EVENT_BLE_DEVICE_OUT_OF_RANGE not received"
+        assert hasattr(evt, 'device_mac') and hasattr(evt, 'reason')
 
-    def test_connect_then_peer_list_shows_device(self, client, ble):
-        """After PC BLE pairing, CMD_BLE_GET_PEERS lists the device."""
+    def test_connect_then_in_range_list_shows_device(self, client, ble):
+        """After PC BLE pairing, CMD_BLE_GET_IN_RANGE lists the device."""
         self._pair(client, ble)
-        _ = client.events.wait_for_event(EVENT_BLE_PEER_CONNECTED, timeout=8.0)
+        _ = client.events.wait_for_event(EVENT_BLE_DEVICE_IN_RANGE, timeout=8.0)
         time.sleep(0.5)
-        peers = client.get_ble_peers()
-        assert peers is not None and len(peers) >= 1, (
-            f"Expected >=1 peer after connect, got {len(peers) if peers else 0}")
-        for p in peers:
+        devices = client.get_ble_in_range()
+        assert devices is not None and len(devices) >= 1, (
+            f"Expected >=1 device after connect, got {len(devices) if devices else 0}")
+        for p in devices:
             assert len(p['mac']) == 6, f"Invalid MAC length: {len(p['mac'])}"
 
-    def test_reconnect_updates_peer_list(self, client, ble):
-        """Disconnect + reconnect; peer list reflects current state."""
+    def test_reconnect_updates_in_range_list(self, client, ble):
+        """Disconnect + reconnect; in-range list reflects current state."""
         self._pair(client, ble)
-        _ = client.events.wait_for_event(EVENT_BLE_PEER_CONNECTED, timeout=8.0)
+        _ = client.events.wait_for_event(EVENT_BLE_DEVICE_IN_RANGE, timeout=8.0)
         assert ble.unpair()
-        _ = client.events.wait_for_event(EVENT_BLE_PEER_DISCONNECTED, timeout=8.0)
+        _ = client.events.wait_for_event(EVENT_BLE_DEVICE_OUT_OF_RANGE, timeout=20.0)
         time.sleep(0.3)
         # Re-pair
         self._pair(client, ble)
-        _ = client.events.wait_for_event(EVENT_BLE_PEER_CONNECTED, timeout=8.0)
+        _ = client.events.wait_for_event(EVENT_BLE_DEVICE_IN_RANGE, timeout=8.0)
         time.sleep(0.3)
-        peers = client.get_ble_peers()
-        assert peers is not None and len(peers) >= 1
+        devices = client.get_ble_in_range()
+        assert devices is not None and len(devices) >= 1

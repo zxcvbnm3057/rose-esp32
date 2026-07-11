@@ -225,7 +225,7 @@ class _MockBridge:
                 patch.object(bridge_service, "port_status", new=AsyncMock(side_effect=self._port_status)),
                 patch.object(bridge_service, "ble_enable_pairing", new=AsyncMock(return_value="123456")),
                 patch.object(bridge_service, "ble_disable_pairing", new=AsyncMock(return_value=True)),
-                patch.object(bridge_service, "ble_get_peers", new=AsyncMock(return_value=[
+                patch.object(bridge_service, "ble_get_in_range", new=AsyncMock(return_value=[
                     {"mac": "AA:BB:CC:DD:EE:FF", "rssi": -45},
                 ])),
                 patch.object(bridge_service, "ble_start_scan", new=AsyncMock(return_value=True)),

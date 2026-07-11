@@ -168,10 +168,10 @@ class CommandDispatcher:
         cmd = CmdBleDisablePairing(reason)
         return self._send_command(CMD_BLE_DISABLE_PAIRING, cmd.to_bytes())
 
-    def ble_get_peers(self) -> Optional[int]:
+    def ble_get_in_range(self) -> Optional[int]:
         """Get BLE peer list."""
-        cmd = CmdBleGetPeers()
-        return self._send_command(CMD_BLE_GET_PEERS, cmd.to_bytes())
+        cmd = CmdBleGetInRange()
+        return self._send_command(CMD_BLE_GET_IN_RANGE, cmd.to_bytes())
 
     def ble_start_scan(self, interval_s: int = 5) -> Optional[int]:
         """Start BLE RSSI scan."""
@@ -182,6 +182,11 @@ class CommandDispatcher:
         """Stop BLE RSSI scan."""
         cmd = CmdBleStopScan()
         return self._send_command(CMD_BLE_STOP_SCAN, cmd.to_bytes())
+
+    def ble_delete_bond(self, device_mac: bytes) -> Optional[int]:
+        """Delete a bonded BLE peer."""
+        cmd = CmdBleDeleteBond(device_mac)
+        return self._send_command(CMD_BLE_DELETE_BOND, cmd.to_bytes())
 
     # System Commands
     def ping(self) -> Optional[int]:

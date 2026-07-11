@@ -7,9 +7,9 @@ from ..src.protocol import (
     MSG_TYPE_EVENT,
     EVENT_BLE_PAIRING_ENABLED,
     EVENT_BLE_PAIRING_DISABLED,
-    EVENT_BLE_PEER_CONNECTED,
-    EVENT_BLE_PEER_DISCONNECTED,
-    EVENT_BLE_PEERS_LIST,
+    EVENT_BLE_DEVICE_IN_RANGE,
+    EVENT_BLE_DEVICE_OUT_OF_RANGE,
+    EVENT_BLE_IN_RANGE_LIST,
     EVENT_BLE_RSSI,
 )
 from ..src.events import EventHandler
@@ -40,38 +40,38 @@ def test_parse_ble_status():
     assert EVENT_BLE_PAIRING_ENABLED in handler.pending_events
 
 
-def test_parse_ble_peers_list():
-    """Test BLE peers list event parsing."""
+def test_parse_ble_in_range_list():
+    """Test BLE in-range device list event parsing."""
     handler = EventHandler()
     mac1 = b'\xaa\xbb\xcc\xdd\xee\xff'
     rssi1 = struct.pack('<b', -45)
     mac2 = b'\x11\x22\x33\x44\x55\x66'
     rssi2 = struct.pack('<b', -72)
-    # Layout (packed): cmd_id(H) peer_count(B) then peers
-    payload = struct.pack('<H', 0) + b'\x02' + mac1 + rssi1 + mac2 + rssi2  # peer_count=2
-    frame = _make_frame(EVENT_BLE_PEERS_LIST, payload)
+    # Layout (packed): cmd_id(H) device_count(B) then devices
+    payload = struct.pack('<H', 0) + b'\x02' + mac1 + rssi1 + mac2 + rssi2  # device_count=2
+    frame = _make_frame(EVENT_BLE_IN_RANGE_LIST, payload)
     handler.handle_event(frame)
-    assert EVENT_BLE_PEERS_LIST in handler.pending_events
+    assert EVENT_BLE_IN_RANGE_LIST in handler.pending_events
 
 
-def test_parse_ble_peer_connected():
-    """Test BLE peer connected event parsing."""
+def test_parse_ble_device_in_range():
+    """Test BLE device in-range event parsing."""
     handler = EventHandler()
     mac = b'\xaa\xbb\xcc\xdd\xee\xff'
     rssi = struct.pack('<b', -50)
-    frame = _make_frame(EVENT_BLE_PEER_CONNECTED, mac + rssi)
+    frame = _make_frame(EVENT_BLE_DEVICE_IN_RANGE, mac + rssi)
     handler.handle_event(frame)
-    assert EVENT_BLE_PEER_CONNECTED in handler.pending_events
+    assert EVENT_BLE_DEVICE_IN_RANGE in handler.pending_events
 
 
-def test_parse_ble_peer_disconnected():
-    """Test BLE peer disconnected event parsing."""
+def test_parse_ble_device_out_of_range():
+    """Test BLE device out-of-range event parsing."""
     handler = EventHandler()
     mac = b'\xaa\xbb\xcc\xdd\xee\xff'
     reason = b'\x13'  # BLE_ERR_REM_USER_CONN_TERM
-    frame = _make_frame(EVENT_BLE_PEER_DISCONNECTED, mac + reason)
+    frame = _make_frame(EVENT_BLE_DEVICE_OUT_OF_RANGE, mac + reason)
     handler.handle_event(frame)
-    assert EVENT_BLE_PEER_DISCONNECTED in handler.pending_events
+    assert EVENT_BLE_DEVICE_OUT_OF_RANGE in handler.pending_events
 
 
 def test_parse_ble_rssi():

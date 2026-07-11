@@ -13,26 +13,131 @@
 
 static const char *TAG = "ble_manager";
 
-#define ENCRYPTED_MAX 16
-static uint16_t encrypted_handles[ENCRYPTED_MAX];
-static int encrypted_count = 0;
+/* ================================================================
+ *  In-range device table — unified presence model
+ *
+ *  A device is "in range" if we have seen recent activity from it,
+ *  regardless of transport:
+ *    - Android (connected): the GATT connection is alive → refreshed
+ *      by the periodic liveness check in ble_rssi_task.
+ *    - iOS (connectionless): after pairing it disconnects and just
+ *      advertises. The controller auto-resolves its RPA to the bonded
+ *      identity address, and the scan callback refreshes it.
+ *
+ *  A device leaves range when neither source refreshes it within
+ *  IN_RANGE_TIMEOUT_S. The table is seeded at boot from the bond
+ *  store so already-paired devices are tracked immediately.
+ * ================================================================ */
+// IN_RANGE_MAX is defined in iot_agent.h (shared with command_dispatcher).
+#define IN_RANGE_TIMEOUT_S 10 // no heartbeat/adv within this window → out of range
+#define CONN_HANDLE_NONE 0xFFFF
 
-static void encrypted_add(uint16_t conn_handle)
+static ble_in_range_device_t in_range_devices[IN_RANGE_MAX];
+
+static ble_in_range_device_t *device_find_by_mac(const uint8_t mac[6])
 {
-    if (encrypted_count < ENCRYPTED_MAX)
-        encrypted_handles[encrypted_count++] = conn_handle;
+    for (int i = 0; i < IN_RANGE_MAX; i++)
+        if (in_range_devices[i].in_use &&
+            memcmp(in_range_devices[i].device_mac, mac, 6) == 0)
+            return &in_range_devices[i];
+    return NULL;
 }
 
-static void encrypted_remove(uint16_t conn_handle)
+static ble_in_range_device_t *device_find_by_handle(uint16_t handle)
 {
-    for (int i = 0; i < encrypted_count; i++)
+    if (handle == CONN_HANDLE_NONE)
+        return NULL;
+    for (int i = 0; i < IN_RANGE_MAX; i++)
+        if (in_range_devices[i].in_use &&
+            in_range_devices[i].conn_handle == handle)
+            return &in_range_devices[i];
+    return NULL;
+}
+
+// Get an existing entry for this identity, or allocate a free slot.
+static ble_in_range_device_t *device_get_or_add(const uint8_t mac[6])
+{
+    ble_in_range_device_t *d = device_find_by_mac(mac);
+    if (d)
+        return d;
+    for (int i = 0; i < IN_RANGE_MAX; i++)
     {
-        if (encrypted_handles[i] == conn_handle)
+        if (!in_range_devices[i].in_use)
         {
-            encrypted_handles[i] = encrypted_handles[--encrypted_count];
-            return;
+            memset(&in_range_devices[i], 0, sizeof(in_range_devices[i]));
+            memcpy(in_range_devices[i].device_mac, mac, 6);
+            in_range_devices[i].in_use = 1;
+            in_range_devices[i].active = 0;
+            in_range_devices[i].conn_handle = CONN_HANDLE_NONE;
+            return &in_range_devices[i];
         }
     }
+    return NULL; // table full
+}
+
+// Refresh activity for a device; emit DEVICE_IN_RANGE on 0→1 transition.
+static void device_mark_active(ble_in_range_device_t *d, int8_t rssi,
+                               uint16_t handle, uint32_t now)
+{
+    if (!d)
+        return;
+    d->last_active_s = now;
+    d->rssi = rssi;
+    if (handle != CONN_HANDLE_NONE)
+        d->conn_handle = handle;
+    if (!d->active)
+    {
+        d->active = 1;
+        d->conn_time_s = now;
+        event_ble_device_in_range_t evt = {0};
+        memcpy(evt.device_mac, d->device_mac, 6);
+        evt.rssi = rssi;
+        send_event(EVENT_BLE_DEVICE_IN_RANGE, &evt, sizeof(evt));
+        ESP_LOGI(TAG, "Device IN RANGE %02x:%02x:%02x:%02x:%02x:%02x rssi=%d",
+                 d->device_mac[0], d->device_mac[1], d->device_mac[2],
+                 d->device_mac[3], d->device_mac[4], d->device_mac[5], rssi);
+    }
+}
+
+// Remove devices that have not been seen within the timeout window.
+static void device_expire_stale(uint32_t now)
+{
+    for (int i = 0; i < IN_RANGE_MAX; i++)
+    {
+        ble_in_range_device_t *d = &in_range_devices[i];
+        if (!d->in_use || !d->active)
+            continue;
+        if (now - d->last_active_s < IN_RANGE_TIMEOUT_S)
+            continue;
+        // Timed out → out of range. Keep the slot (device is still bonded)
+        // but mark inactive so a later heartbeat/adv re-triggers IN_RANGE.
+        d->active = 0;
+        d->conn_handle = CONN_HANDLE_NONE;
+        event_ble_device_out_of_range_t evt = {0};
+        memcpy(evt.device_mac, d->device_mac, 6);
+        evt.reason = 0; // 0 = presence timeout
+        send_event(EVENT_BLE_DEVICE_OUT_OF_RANGE, &evt, sizeof(evt));
+        ESP_LOGI(TAG, "Device OUT OF RANGE (timeout) %02x:%02x:%02x:%02x:%02x:%02x",
+                 d->device_mac[0], d->device_mac[1], d->device_mac[2],
+                 d->device_mac[3], d->device_mac[4], d->device_mac[5]);
+    }
+}
+
+// Seed the table with all bonded identities so paired devices are
+// tracked from boot even before we see their first heartbeat/adv.
+static void device_seed_from_bonds(void)
+{
+    ble_addr_t addrs[IN_RANGE_MAX];
+    int num = 0;
+    int rc = ble_store_util_bonded_peers(addrs, &num, IN_RANGE_MAX);
+    if (rc != 0)
+    {
+        ESP_LOGW(TAG, "bonded_peers failed; rc=%d", rc);
+        return;
+    }
+    for (int i = 0; i < num; i++)
+        device_get_or_add(addrs[i].val);
+    ESP_LOGI(TAG, "Seeded %d bonded device(s) into in-range table", num);
 }
 
 uint8_t ble_pairing_enabled = 0;
@@ -119,6 +224,8 @@ static void ble_host_task(void *pvParameters);
 static void ble_on_sync(void);
 static void ble_on_reset(int reason);
 static void ble_restart_advertising(void);
+static void ble_start_scan(void);
+static int ble_scan_event(struct ble_gap_event *event, void *arg);
 
 /* ================================================================
  *  Init — NimBLE HID peripheral pattern (media device, no input)
@@ -173,8 +280,14 @@ static void ble_on_reset(int reason)
 
 static void ble_on_sync(void)
 {
-    ESP_LOGI(TAG, "NimBLE host synced, starting advertising");
+    ESP_LOGI(TAG, "NimBLE host synced, starting advertising + scanning");
+    // Seed the in-range table with already-bonded devices so presence is
+    // tracked from boot. Their RPAs will be auto-resolved by the controller.
+    device_seed_from_bonds();
     ble_app_advertise();
+    // Run the observer (scan) role in parallel with advertising so we can
+    // detect connectionless (iOS) bonded devices via their resolved adv.
+    ble_start_scan();
 }
 
 static void ble_host_task(void *pvParameters)
@@ -261,8 +374,69 @@ static void ble_restart_advertising(void)
 }
 
 /* ================================================================
- *  GAP event handler — follows bleprph patterns
- *  PIN pairing, peer table, encryption, and RSSI logic UNCHANGED.
+ *  Passive scan (observer role) — detects connectionless bonded
+ *  devices (iOS) via their advertisements. The controller resolves
+ *  each RPA back to the bonded identity address automatically (its
+ *  IRK is in the NVS bond store), so disc->addr matches a table
+ *  entry directly. Runs forever, auto-restarting on completion, in
+ *  parallel with advertising.
+ * ================================================================ */
+static void ble_start_scan(void)
+{
+    struct ble_gap_disc_params scan_params = {0};
+    scan_params.itvl = 0x0100;     // 160 ms
+    scan_params.window = 0x0050;   // 50 ms — leave airtime for adv/conn
+    scan_params.filter_policy = 0; // accept all; we match by identity below
+    scan_params.limited = 0;
+    scan_params.passive = 1;           // passive: we only need adv address + RSSI
+    scan_params.filter_duplicates = 0; // need repeats to keep refreshing presence
+
+    int rc = ble_gap_disc(BLE_ADDR_PUBLIC, BLE_HS_FOREVER,
+                          &scan_params, ble_scan_event, NULL);
+    if (rc != 0 && rc != BLE_HS_EALREADY)
+        ESP_LOGW(TAG, "scan start failed; rc=%d", rc);
+    else
+        ESP_LOGI(TAG, "Scanning started (passive, resolving bonded RPAs)");
+}
+
+static int ble_scan_event(struct ble_gap_event *event, void *arg)
+{
+    switch (event->type)
+    {
+    case BLE_GAP_EVENT_DISC:
+    {
+        // The controller has already resolved a bonded peer's RPA to its
+        // identity address, so a direct table lookup by address works.
+        ble_in_range_device_t *d = device_find_by_mac(event->disc.addr.val);
+        if (d)
+        {
+            uint32_t now = (uint32_t)(esp_timer_get_time() / 1000000);
+            device_mark_active(d, event->disc.rssi, CONN_HANDLE_NONE, now);
+            // Emit telemetry RSSI so the console can display live signal.
+            event_ble_rssi_t evt = {0};
+            memcpy(evt.device_mac, d->device_mac, 6);
+            evt.rssi = event->disc.rssi;
+            evt.timestamp_us = esp_timer_get_time();
+            send_event(EVENT_BLE_RSSI, &evt, sizeof(evt));
+        }
+        return 0;
+    }
+
+    case BLE_GAP_EVENT_DISC_COMPLETE:
+        // Scan cycle finished — restart to keep observing continuously.
+        ESP_LOGD(TAG, "Scan complete (reason=%d), restarting", event->disc_complete.reason);
+        ble_start_scan();
+        return 0;
+
+    default:
+        return 0;
+    }
+}
+
+/* ================================================================
+ *  GAP event handler — advertising/connection (peripheral role).
+ *  PIN pairing and encryption flow unchanged; the peer table is now
+ *  the unified in-range device table.
  * ================================================================ */
 static int ble_gap_event(struct ble_gap_event *event, void *arg)
 {
@@ -314,14 +488,16 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
         ESP_LOGI(TAG, "DISCONNECT reason=%d conn=%d",
                  event->disconnect.reason, event->disconnect.conn.conn_handle);
         {
+            // A disconnect does NOT immediately mean out-of-range. An iOS
+            // device intentionally drops the connection after pairing to go
+            // connectionless — we keep tracking it via its advertisements.
+            // Just detach the conn_handle; presence is governed by the
+            // IN_RANGE_TIMEOUT_S window in ble_rssi_task. If the device is
+            // truly gone, it stops advertising and times out there.
             uint16_t handle = event->disconnect.conn.conn_handle;
-            encrypted_remove(handle);
-            event_ble_peer_disconnected_t evt = {0};
-            // 连接此刻已断开，ble_gap_conn_find(handle) 会失败导致 MAC 全为 0。
-            // disconnect 事件本身携带对端连接描述符，直接取身份地址即可。
-            memcpy(evt.peer_mac, event->disconnect.conn.peer_id_addr.val, 6);
-            evt.reason = event->disconnect.reason;
-            send_event(EVENT_BLE_PEER_DISCONNECTED, &evt, sizeof(evt));
+            ble_in_range_device_t *d = device_find_by_handle(handle);
+            if (d)
+                d->conn_handle = CONN_HANDLE_NONE;
         }
         ble_app_advertise();
         return 0;
@@ -332,14 +508,21 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
         if (event->enc_change.status == 0)
         {
             uint16_t handle = event->enc_change.conn_handle;
-            encrypted_add(handle);
             struct ble_gap_conn_desc enc_desc;
-            event_ble_peer_connected_t evt = {0};
             if (ble_gap_conn_find(handle, &enc_desc) == 0)
-                memcpy(evt.peer_mac, enc_desc.peer_id_addr.val, 6);
-            evt.rssi = -50;
-            send_event(EVENT_BLE_PEER_CONNECTED, &evt, sizeof(evt));
-            ESP_LOGI(TAG, "Peer connected (encryption OK)");
+            {
+                // Encryption complete → device is present via a live
+                // connection. Add/refresh its table entry (Android path;
+                // an iOS device will later disconnect and be tracked via
+                // its resolved advertisements instead).
+                uint32_t now = (uint32_t)(esp_timer_get_time() / 1000000);
+                int8_t rssi = -50;
+                ble_gap_conn_rssi(handle, &rssi);
+                ble_in_range_device_t *d =
+                    device_get_or_add(enc_desc.peer_id_addr.val);
+                device_mark_active(d, rssi, handle, now);
+            }
+            ESP_LOGI(TAG, "Device bonded (encryption OK)");
             if (ble_pairing_enabled)
             {
                 // Pairing finished: auto-disable pin. ble_disable_pairing()
@@ -351,16 +534,8 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
         }
         else
         {
-            ESP_LOGW(TAG, "Encryption FAILED status=%d — cleaning up", event->enc_change.status);
-            uint16_t handle = event->enc_change.conn_handle;
-            encrypted_remove(handle);
-            struct ble_gap_conn_desc enc_desc;
-            event_ble_peer_disconnected_t evt = {0};
-            if (ble_gap_conn_find(handle, &enc_desc) == 0)
-                memcpy(evt.peer_mac, enc_desc.peer_id_addr.val, 6);
-            evt.reason = event->enc_change.status;
-            send_event(EVENT_BLE_PEER_DISCONNECTED, &evt, sizeof(evt));
-            ble_gap_terminate(handle, BLE_ERR_REM_USER_CONN_TERM);
+            ESP_LOGW(TAG, "Encryption FAILED status=%d — terminating", event->enc_change.status);
+            ble_gap_terminate(event->enc_change.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
         }
         return 0;
 
@@ -449,29 +624,34 @@ void ble_disable_pairing(void)
     ble_restart_advertising();
 }
 
-void ble_get_peers_list(ble_peer_t *peers, int *peer_count)
+void ble_get_in_range_devices(ble_in_range_device_t *devices, int *device_count)
 {
     int count = 0;
-    for (int i = 0; i < encrypted_count && count < *peer_count; i++)
+    for (int i = 0; i < IN_RANGE_MAX && count < *device_count; i++)
     {
-        uint16_t handle = encrypted_handles[i];
-        struct ble_gap_conn_desc desc;
-        if (ble_gap_conn_find(handle, &desc) != 0)
+        ble_in_range_device_t *d = &in_range_devices[i];
+        if (!d->in_use || !d->active)
             continue;
-        memcpy(peers[count].peer_mac, desc.peer_id_addr.val, 6);
-        int8_t rssi = -60;
-        ble_gap_conn_rssi(handle, &rssi);
-        peers[count].rssi = rssi;
-        peers[count].conn_handle = handle;
+        memcpy(devices[count].device_mac, d->device_mac, 6);
+        devices[count].rssi = d->rssi;
+        devices[count].conn_handle = d->conn_handle;
+        devices[count].conn_time_s = d->conn_time_s;
+        devices[count].last_active_s = d->last_active_s;
+        devices[count].in_use = 1;
+        devices[count].active = 1;
         count++;
     }
-    *peer_count = count;
-    ESP_LOGI(TAG, "Peers: %d encrypted", count);
+    *device_count = count;
+    ESP_LOGI(TAG, "In-range devices: %d", count);
 }
 
-int ble_encrypted_peer_count(void)
+int ble_in_range_device_count(void)
 {
-    return encrypted_count;
+    int count = 0;
+    for (int i = 0; i < IN_RANGE_MAX; i++)
+        if (in_range_devices[i].in_use && in_range_devices[i].active)
+            count++;
+    return count;
 }
 
 void ble_start_rssi_scan(uint32_t interval_s)
@@ -488,6 +668,41 @@ void ble_stop_rssi_scan(void)
     ble_rssi_scan_enabled = 0;
     nvs_save_ble();
     ESP_LOGI(TAG, "RSSI scan stopped");
+}
+
+int ble_delete_bond(const uint8_t device_mac[6])
+{
+    ble_in_range_device_t *device = device_find_by_mac(device_mac);
+    uint16_t conn_handle = device ? device->conn_handle : CONN_HANDLE_NONE;
+    bool was_active = device && device->active;
+    ble_addr_t peer_addr = {.type = BLE_ADDR_PUBLIC};
+    memcpy(peer_addr.val, device_mac, sizeof(peer_addr.val));
+
+    int rc = ble_store_util_delete_peer(&peer_addr);
+    if (rc != 0)
+    {
+        peer_addr.type = BLE_ADDR_RANDOM;
+        rc = ble_store_util_delete_peer(&peer_addr);
+    }
+    if (rc != 0)
+    {
+        ESP_LOGW(TAG, "Failed to delete bond; rc=%d", rc);
+        return rc;
+    }
+
+    if (conn_handle != CONN_HANDLE_NONE)
+        ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+    if (was_active)
+    {
+        event_ble_device_out_of_range_t evt = {0};
+        memcpy(evt.device_mac, device_mac, sizeof(evt.device_mac));
+        evt.reason = 1; // bond deleted
+        send_event(EVENT_BLE_DEVICE_OUT_OF_RANGE, &evt, sizeof(evt));
+    }
+    if (device)
+        memset(device, 0, sizeof(*device));
+    ESP_LOGI(TAG, "Deleted BLE bond");
+    return 0;
 }
 
 void ble_rssi_task(void *pvParameters)
@@ -507,24 +722,34 @@ void ble_rssi_task(void *pvParameters)
                 ble_disable_pairing();
             }
         }
-        // Always monitor RSSI for connected (encrypted) peers
+        // Liveness for connected (Android) devices: while the GATT link is
+        // up, poll its RSSI. A successful poll both refreshes presence and
+        // emits telemetry. iOS devices are refreshed by the scan callback
+        // instead, so they are skipped here (conn_handle == NONE).
         if (now - ble_rssi_last_scan_time >= 5)
         {
             ble_rssi_last_scan_time = now;
-            for (int i = 0; i < encrypted_count; i++)
+            for (int i = 0; i < IN_RANGE_MAX; i++)
             {
-                uint16_t handle = encrypted_handles[i];
-                struct ble_gap_conn_desc d;
-                if (ble_gap_conn_find(handle, &d) != 0)
+                ble_in_range_device_t *dev = &in_range_devices[i];
+                if (!dev->in_use || dev->conn_handle == CONN_HANDLE_NONE)
                     continue;
+                struct ble_gap_conn_desc d;
+                if (ble_gap_conn_find(dev->conn_handle, &d) != 0)
+                    continue; // link gone; timeout path will expire it
                 int8_t rssi = -60;
-                ble_gap_conn_rssi(handle, &rssi);
+                ble_gap_conn_rssi(dev->conn_handle, &rssi);
+                device_mark_active(dev, rssi, dev->conn_handle, now);
                 event_ble_rssi_t evt = {0};
-                memcpy(evt.peer_mac, d.peer_id_addr.val, 6);
+                memcpy(evt.device_mac, d.peer_id_addr.val, 6);
                 evt.rssi = rssi;
                 evt.timestamp_us = esp_timer_get_time();
                 send_event(EVENT_BLE_RSSI, &evt, sizeof(evt));
             }
         }
+
+        // Expire devices whose last activity (heartbeat or resolved adv) is
+        // older than the presence window → emit DEVICE_OUT_OF_RANGE.
+        device_expire_stale(now);
     }
 }

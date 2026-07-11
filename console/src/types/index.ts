@@ -84,7 +84,7 @@ export interface UartState {
 export interface BleState {
     pairing_enabled: boolean;
     scan_enabled: boolean;
-    peer_count: number;
+    device_count: number;
 }
 
 // ── Custom Command ──────────────────────────────────────────

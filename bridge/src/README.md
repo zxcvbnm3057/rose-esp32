@@ -68,12 +68,12 @@ if result:
 ```python
 # Enable pairing for 60 seconds
 client.enable_ble_pairing(timeout_s=60)
-print("Pairing enabled, waiting for peer...")
+print("Pairing enabled, waiting for device...")
 
-# After peer connects
-peers = client.get_ble_peers()
-for mac, rssi in peers:
-    print(f"Peer: {mac.hex()}, RSSI: {rssi} dBm")
+# Query devices currently in range
+devices = client.get_ble_in_range()
+for device in devices:
+    print(f"Device: {device['mac'].hex()}, RSSI: {device['rssi']} dBm")
 
 # Disable pairing
 client.disable_ble_pairing()
@@ -200,7 +200,7 @@ The single source of truth for all opcodes is the firmware header
 | 0x40 | CMD_THREAD_PASSTHROUGH | Thread | Forward to downstream device |
 | 0x50 | CMD_BLE_ENABLE_PAIRING | BLE | Start pairing (timeout_s) |
 | 0x51 | CMD_BLE_DISABLE_PAIRING | BLE | Stop pairing (reason) |
-| 0x52 | CMD_BLE_GET_PEERS | BLE | List connected peers |
+| 0x52 | CMD_BLE_GET_IN_RANGE | BLE | List devices currently in range |
 | 0x53 | CMD_BLE_START_SCAN | BLE | Start RSSI scan (interval_s) |
 | 0x54 | CMD_BLE_STOP_SCAN | BLE | Stop RSSI scan |
 | 0xFE | CMD_HEARTBEAT | System | Host-initiated keepalive (timestamp) |
@@ -226,12 +226,12 @@ The single source of truth for all opcodes is the firmware header
 | 0x51 | EVENT_GPIO_STATUS | GPIO | full GPIO snapshot: mode/pull/edge/value/adc (for sync) |
 | 0x60 | EVENT_BLE_PAIRING_ENABLED | BLE | pin_code[6], timeout_s |
 | 0x61 | EVENT_BLE_PAIRING_DISABLED | BLE | reason (0=other,1=timeout,2=paired) |
-| 0x62 | EVENT_BLE_PEER_CONNECTED | BLE | peer_mac[6], rssi |
-| 0x63 | EVENT_BLE_PEER_DISCONNECTED | BLE | peer_mac[6], reason |
-| 0x64 | EVENT_BLE_PEERS_LIST | BLE | peer_count + N×(mac[6], rssi) |
-| 0x65 | EVENT_BLE_RSSI | BLE | peer_mac[6], rssi, timestamp_us |
+| 0x62 | EVENT_BLE_DEVICE_IN_RANGE | BLE | device_mac[6], rssi |
+| 0x63 | EVENT_BLE_DEVICE_OUT_OF_RANGE | BLE | device_mac[6], reason |
+| 0x64 | EVENT_BLE_IN_RANGE_LIST | BLE | device_count + N×(mac[6], rssi) |
+| 0x65 | EVENT_BLE_RSSI | BLE | device_mac[6], rssi, timestamp_us |
 | 0x66 | EVENT_SYNC_RESPONSE | Sync | session_version + pending/port counts |
-| 0x67 | EVENT_BLE_STATUS | BLE | pairing_enabled, scan_enabled, peer_count, timeout_s |
+| 0x67 | EVENT_BLE_STATUS | BLE | pairing_enabled, scan_enabled, device_count, timeout_s |
 | 0xFD | EVENT_HEARTBEAT | System | timestamp, connection_state |
 | 0xFE | EVENT_ERROR | System | cmd_id, err_code, message |
 
@@ -457,8 +457,8 @@ received = client.read_uart(uart_id, length=256)
 pin = client.enable_ble_pairing(timeout_s=60)
 client.disable_ble_pairing()
 
-# Peer management
-peers = client.get_ble_peers()
+# In-range device query
+devices = client.get_ble_in_range()
 
 # RSSI scanning
 client.start_ble_scan(interval_s=5)

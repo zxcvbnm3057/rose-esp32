@@ -23,8 +23,8 @@ async def test_ble_disable_pairing(client, mock_bridge, is_real):
 
 
 @pytest.mark.anyio
-async def test_ble_get_peers(client, mock_bridge, is_real):
-    res = await client.get("/api/v1/ble/peers")
+async def test_ble_get_in_range(client, mock_bridge, is_real):
+    res = await client.get("/api/v1/ble/in-range")
     if is_real:
         assert res.status_code in (200, 502)
     else:
@@ -57,18 +57,18 @@ def test_ble_status_from_bytes():
     evt = EventBleStatus.from_bytes(data)
     assert evt.pairing_enabled == 1
     assert evt.scan_enabled == 0
-    assert evt.peer_count == 2
+    assert evt.device_count == 2
     assert evt.pairing_timeout_s == 60
 
 
 def test_ble_status_event_to_dict():
     from src.bridge.protocol import EventBleStatus
     from src.services.bridge_service import _event_to_dict
-    evt = EventBleStatus(pairing_enabled=0, scan_enabled=1, peer_count=3, pairing_timeout_s=120)
+    evt = EventBleStatus(pairing_enabled=0, scan_enabled=1, device_count=3, pairing_timeout_s=120)
     d = _event_to_dict("ble_status", evt)
     assert d == {
         "pairing_enabled": 0, "scan_enabled": 1,
-        "peer_count": 3, "pairing_timeout_s": 120,
+        "device_count": 3, "pairing_timeout_s": 120,
     }
 
 
@@ -92,16 +92,16 @@ async def test_ble_enable_pairing_returns_pin(client, mock_bridge, is_real):
 
 
 @pytest.mark.anyio
-async def test_ble_peers_returns_list(client, mock_bridge, is_real):
-    """Verify peers response contains expected structure."""
-    res = await client.get("/api/v1/ble/peers")
+async def test_ble_in_range_returns_list(client, mock_bridge, is_real):
+    """Verify in-range response contains expected structure."""
+    res = await client.get("/api/v1/ble/in-range")
     if not is_real:
         assert res.status_code == 200
         data = res.json()["data"]
-        peers = data.get("peers", [])
-        assert isinstance(peers, list)
-        if peers:
-            p0 = peers[0]
+        devices = data.get("devices", [])
+        assert isinstance(devices, list)
+        if devices:
+            p0 = devices[0]
             assert "mac" in p0
             assert "rssi" in p0
             assert isinstance(p0["rssi"], int)
@@ -127,37 +127,37 @@ async def test_ble_pairing_timeout_validation(client, mock_bridge, is_real):
 
 # ── BLE peer event_to_dict ────────────────────────────────
 
-def test_ble_peers_list_event_to_dict():
-    from src.bridge.protocol import EventBlePeersList
+def test_ble_in_range_list_event_to_dict():
+    from src.bridge.protocol import EventBleInRangeList
     from src.services.bridge_service import _event_to_dict
-    evt = EventBlePeersList(cmd_id=0, peer_count=1, peers=[(b'\xaa\xbb\xcc\xdd\xee\xff', -45)])
-    d = _event_to_dict("ble_peers_list", evt)
-    assert d["peer_count"] == 1
-    assert len(d["peers"]) == 1
+    evt = EventBleInRangeList(cmd_id=0, device_count=1, devices=[(b'\xaa\xbb\xcc\xdd\xee\xff', -45)])
+    d = _event_to_dict("ble_in_range_list", evt)
+    assert d["device_count"] == 1
+    assert len(d["devices"]) == 1
     # MAC bytes are little-endian on the wire; displayed reversed + colon-separated.
-    assert d["peers"][0]["mac"] == "ff:ee:dd:cc:bb:aa"
-    assert d["peers"][0]["rssi"] == -45
+    assert d["devices"][0]["mac"] == "ff:ee:dd:cc:bb:aa"
+    assert d["devices"][0]["rssi"] == -45
 
-def test_ble_peer_connected_event_to_dict():
-    from src.bridge.protocol import EventBlePeerConnected
+def test_ble_device_in_range_event_to_dict():
+    from src.bridge.protocol import EventBleDeviceInRange
     from src.services.bridge_service import _event_to_dict
-    evt = EventBlePeerConnected(peer_mac=b'\x11\x22\x33\x44\x55\x66', rssi=-50)
-    d = _event_to_dict("ble_peer_connected", evt)
+    evt = EventBleDeviceInRange(device_mac=b'\x11\x22\x33\x44\x55\x66', rssi=-50)
+    d = _event_to_dict("ble_device_in_range", evt)
     assert d["mac"] == "66:55:44:33:22:11"
     assert d["rssi"] == -50
 
-def test_ble_peer_disconnected_event_to_dict():
-    from src.bridge.protocol import EventBlePeerDisconnected
+def test_ble_device_out_of_range_event_to_dict():
+    from src.bridge.protocol import EventBleDeviceOutOfRange
     from src.services.bridge_service import _event_to_dict
-    evt = EventBlePeerDisconnected(peer_mac=b'\xaa\xaa\xaa\xaa\xaa\xaa', reason=1)
-    d = _event_to_dict("ble_peer_disconnected", evt)
+    evt = EventBleDeviceOutOfRange(device_mac=b'\xaa\xaa\xaa\xaa\xaa\xaa', reason=1)
+    d = _event_to_dict("ble_device_out_of_range", evt)
     assert d["mac"] == "aa:aa:aa:aa:aa:aa"
     assert d["reason"] == 1
 
 def test_ble_rssi_event_to_dict():
     from src.bridge.protocol import EventBleRssi
     from src.services.bridge_service import _event_to_dict
-    evt = EventBleRssi(peer_mac=b'\xbb\xbb\xbb\xbb\xbb\xbb', rssi=-55, timestamp_us=12345)
+    evt = EventBleRssi(device_mac=b'\xbb\xbb\xbb\xbb\xbb\xbb', rssi=-55, timestamp_us=12345)
     d = _event_to_dict("ble_rssi", evt)
     assert d["mac"] == "bb:bb:bb:bb:bb:bb"
     assert d["rssi"] == -55

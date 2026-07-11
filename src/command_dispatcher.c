@@ -302,11 +302,11 @@ static void send_pending_sync_snapshot(uint16_t cmd_id)
 
     // Send BLE status
     {
-        uint8_t peer_count = (uint8_t)ble_encrypted_peer_count();
+        uint8_t device_count = (uint8_t)ble_in_range_device_count();
         event_ble_status_t ble_status = {
             .pairing_enabled = ble_pairing_enabled,
             .scan_enabled = ble_rssi_scan_enabled,
-            .peer_count = peer_count,
+            .device_count = device_count,
             .pairing_timeout_s = ble_pairing_timeout_s,
         };
         send_event(EVENT_BLE_STATUS, &ble_status, sizeof(event_ble_status_t));
@@ -975,31 +975,31 @@ void handle_command(msg_frame_t *frame)
         break;
     }
 
-    case CMD_BLE_GET_PEERS:
+    case CMD_BLE_GET_IN_RANGE:
     {
-        ble_peer_t peers_buffer[4] = {0};
-        int peer_count = 4;
-        ble_get_peers_list(peers_buffer, &peer_count);
+        ble_in_range_device_t devices_buffer[IN_RANGE_MAX] = {0};
+        int device_count = IN_RANGE_MAX;
+        ble_get_in_range_devices(devices_buffer, &device_count);
 
         // 构建响应
-        int response_size = sizeof(event_ble_peers_list_t) + (peer_count * 7);
+        int response_size = sizeof(event_ble_in_range_list_t) + (device_count * 7);
         uint8_t *response = malloc(response_size);
         if (!response)
             break;
 
-        event_ble_peers_list_t *evt = (event_ble_peers_list_t *)response;
+        event_ble_in_range_list_t *evt = (event_ble_in_range_list_t *)response;
         evt->cmd_id = cmd_id;
-        evt->peer_count = peer_count;
+        evt->device_count = device_count;
 
-        uint8_t *data_ptr = response + sizeof(event_ble_peers_list_t);
-        for (int i = 0; i < peer_count; i++)
+        uint8_t *data_ptr = response + sizeof(event_ble_in_range_list_t);
+        for (int i = 0; i < device_count; i++)
         {
-            memcpy(data_ptr, peers_buffer[i].peer_mac, 6);
-            data_ptr[6] = (uint8_t)peers_buffer[i].rssi;
+            memcpy(data_ptr, devices_buffer[i].device_mac, 6);
+            data_ptr[6] = (uint8_t)devices_buffer[i].rssi;
             data_ptr += 7;
         }
 
-        send_event(EVENT_BLE_PEERS_LIST, response, response_size);
+        send_event(EVENT_BLE_IN_RANGE_LIST, response, response_size);
         free(response);
         break;
     }
@@ -1016,6 +1016,14 @@ void handle_command(msg_frame_t *frame)
     {
         ble_stop_rssi_scan();
         send_cmd_ack(cmd_id, 0, 0, 0);
+        break;
+    }
+
+    case CMD_BLE_DELETE_BOND:
+    {
+        cmd_ble_delete_bond_t *cmd = (cmd_ble_delete_bond_t *)&frame->payload[1];
+        int rc = ble_delete_bond(cmd->device_mac);
+        send_cmd_ack(cmd_id, rc == 0 ? 0 : 1, rc == 0 ? 0 : IOT_ERR_NOT_FOUND, 0);
         break;
     }
 

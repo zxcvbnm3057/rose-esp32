@@ -13,8 +13,8 @@ from typing import Optional, Any, List, Tuple, Dict
 from .server import IoTAgentServer
 from .commands import CommandDispatcher
 from .events import EventHandler
-from .protocol import EventCmdAck, EventGpioValue, EventAdcValue, EventGpioSignalCaptured, EventBlePairingEnabled, EventBlePeersList, EventHeartbeat, EventUartRx, EventSyncResponse, EventError
-from .protocol import EVENT_SYNC_RESPONSE, EVENT_GPIO_VALUE, EVENT_ADC_VALUE, EVENT_GPIO_SIGNAL_CAPTURED, EVENT_UART_RX, EVENT_HEARTBEAT, EVENT_BLE_PEERS_LIST, EVENT_BLE_PAIRING_ENABLED, EVENT_ERROR, RESOURCE_GPIO, RESOURCE_UART
+from .protocol import EventCmdAck, EventGpioValue, EventAdcValue, EventGpioSignalCaptured, EventBlePairingEnabled, EventBleInRangeList, EventHeartbeat, EventUartRx, EventSyncResponse, EventError
+from .protocol import EVENT_SYNC_RESPONSE, EVENT_GPIO_VALUE, EVENT_ADC_VALUE, EVENT_GPIO_SIGNAL_CAPTURED, EVENT_UART_RX, EVENT_HEARTBEAT, EVENT_BLE_IN_RANGE_LIST, EVENT_BLE_PAIRING_ENABLED, EVENT_ERROR, RESOURCE_GPIO, RESOURCE_UART
 
 logger = logging.getLogger(__name__)
 
@@ -410,9 +410,9 @@ class IoTAgentClient:
             return response.pin_code
         return None
 
-    def get_peers(self) -> Optional[List[dict]]:
-        """Compatibility alias for BLE peer list API."""
-        return self.get_ble_peers()
+    def get_in_range(self) -> Optional[List[dict]]:
+        """Compatibility alias for BLE in-range device list API."""
+        return self.get_ble_in_range()
 
     def disable_ble_pairing(self) -> bool:
         """Disable BLE pairing."""
@@ -423,15 +423,15 @@ class IoTAgentClient:
         response = self.events.wait_for_response(cmd_id)
         return self._check_ack(response)
 
-    def get_ble_peers(self) -> Optional[List[dict]]:
-        """Get BLE peer list."""
-        cmd_id = self.commands.ble_get_peers()
+    def get_ble_in_range(self) -> Optional[List[dict]]:
+        """Get BLE in-range device list."""
+        cmd_id = self.commands.ble_get_in_range()
         if cmd_id is None:
             return None
-        # Correlate by cmd_id (the peers-list event echoes the command id).
-        response = self.events.wait_for_response_of_type(cmd_id, (EventBlePeersList,), timeout=2.0)
-        if isinstance(response, EventBlePeersList):
-            return [{'mac': mac, 'rssi': rssi} for mac, rssi in response.peers]
+        # Correlate by cmd_id (the in-range list event echoes the command id).
+        response = self.events.wait_for_response_of_type(cmd_id, (EventBleInRangeList,), timeout=2.0)
+        if isinstance(response, EventBleInRangeList):
+            return [{'mac': mac, 'rssi': rssi} for mac, rssi in response.devices]
         return None
 
     def start_ble_scan(self, interval_s: int = 5) -> bool:
@@ -446,6 +446,15 @@ class IoTAgentClient:
     def stop_ble_scan(self) -> bool:
         """Stop BLE RSSI scan."""
         cmd_id = self.commands.ble_stop_scan()
+        if cmd_id is None:
+            self.last_error = None
+            return False
+        response = self.events.wait_for_response(cmd_id)
+        return self._check_ack(response)
+
+    def delete_ble_bond(self, device_mac: bytes) -> bool:
+        """Delete a bonded BLE peer from firmware storage."""
+        cmd_id = self.commands.ble_delete_bond(device_mac)
         if cmd_id is None:
             self.last_error = None
             return False

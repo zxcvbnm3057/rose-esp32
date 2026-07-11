@@ -12,7 +12,7 @@ from ..src.protocol import (
     CMD_BLE_ENABLE_PAIRING,
     CMD_BLE_START_SCAN,
     CMD_BLE_STOP_SCAN,
-    EVENT_BLE_PEER_CONNECTED,
+    EVENT_BLE_DEVICE_IN_RANGE,
     EVENT_BLE_RSSI,
     CmdGpioConfig,
     CmdGpioSet,
@@ -92,7 +92,7 @@ def test_command_types():
 
 def test_event_types():
     """Verify event opcodes are within valid range."""
-    events = {EVENT_BLE_PEER_CONNECTED, EVENT_BLE_RSSI}
+    events = {EVENT_BLE_DEVICE_IN_RANGE, EVENT_BLE_RSSI}
     for e in events:
         assert 0 <= e <= 0xFF
 

@@ -10,8 +10,8 @@ from ..src import (
     IoTAgentClient,
     EVENT_BLE_PAIRING_ENABLED,
     EVENT_BLE_PAIRING_DISABLED,
-    EVENT_BLE_PEER_CONNECTED,
-    EVENT_BLE_PEER_DISCONNECTED,
+    EVENT_BLE_DEVICE_IN_RANGE,
+    EVENT_BLE_DEVICE_OUT_OF_RANGE,
     EVENT_BLE_RSSI,
 )
 
@@ -48,7 +48,7 @@ class TestBLEIntegration:
 
         FULLY AUTOMATED: the firmware's PIN (EVENT_BLE_PAIRING_ENABLED) is
         injected through the Windows Runtime custom-pairing API, so no PIN
-        dialog appears. The firmware emits EVENT_BLE_PEER_CONNECTED after
+        dialog appears. The firmware emits EVENT_BLE_DEVICE_IN_RANGE after
         encryption succeeds.
         """
         from .ble_helper import BleTestHelper
@@ -80,24 +80,24 @@ class TestBLEIntegration:
             assert ble.pair_with_pin(pin, timeout=25.0), (
                 f"Automated PIN pairing to {target_addr} failed")
 
-            peer_connected_evt = client.events.wait_for_event(EVENT_BLE_PEER_CONNECTED, timeout=10.0)
-            assert peer_connected_evt is not None, "No BLE peer connected event observed"
+            in_range_evt = client.events.wait_for_event(EVENT_BLE_DEVICE_IN_RANGE, timeout=10.0)
+            assert in_range_evt is not None, "No BLE device in-range event observed"
             # NimBLE may report random identity address, not scannable address
-            assert len(peer_connected_evt.peer_mac) == 6, "Invalid peer MAC length"
+            assert len(in_range_evt.device_mac) == 6, "Invalid device MAC length"
 
             assert client.start_ble_scan(interval_s=2)
             rssi_evt = client.events.wait_for_event(EVENT_BLE_RSSI, timeout=8.0)
             assert rssi_evt is not None, "No BLE RSSI event observed after scan start"
             assert -100 <= rssi_evt.rssi <= 20
 
-            peers = client.get_ble_peers()
-            assert peers is not None
-            assert len(peers) >= 1
+            devices = client.get_ble_in_range()
+            assert devices is not None
+            assert len(devices) >= 1
 
             assert ble.unpair()  # drop the encrypted link
-            disconnected_evt = client.events.wait_for_event(EVENT_BLE_PEER_DISCONNECTED, timeout=10.0)
-            assert disconnected_evt is not None, "No BLE peer disconnected event observed"
-            assert len(disconnected_evt.peer_mac) == 6
+            out_of_range_evt = client.events.wait_for_event(EVENT_BLE_DEVICE_OUT_OF_RANGE, timeout=15.0)
+            assert out_of_range_evt is not None, "No BLE device out-of-range event observed"
+            assert len(out_of_range_evt.device_mac) == 6
 
             disable_cmd = client.commands.ble_disable_pairing()
             assert disable_cmd is not None
@@ -130,14 +130,14 @@ class TestBLEIntegration:
             client.events.clear_pending()
             assert ble.pair_with_pin(pin.decode("ascii"), timeout=25.0), (
                 "Automated PIN pairing failed")
-            # Wait for peer_connected event (may arrive asynchronously)
-            client.events.wait_for_event(EVENT_BLE_PEER_CONNECTED, timeout=8.0)
+            # Wait for device-in-range event (may arrive asynchronously)
+            client.events.wait_for_event(EVENT_BLE_DEVICE_IN_RANGE, timeout=8.0)
 
             assert client.start_ble_scan(interval_s=2)
             evt = client.events.wait_for_event(EVENT_BLE_RSSI, timeout=15.0)
             if evt is None:
                 pytest.skip("No RSSI events in scan window")
-            assert len(evt.peer_mac) == 6
+            assert len(evt.device_mac) == 6
             assert -127 <= evt.rssi <= 20
         finally:
             ble.cleanup()

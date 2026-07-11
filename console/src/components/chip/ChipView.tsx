@@ -2,6 +2,7 @@ import { useMemo, useState, useCallback } from 'react';
 import { useDeviceStore, getUartForGpio } from '../../stores/deviceStore';
 import { groupPins, rotateLayout, isFixedPin } from './chipLayout';
 import { PinPad } from './PinPad';
+import type { PinConfig } from '../../types';
 
 const COOKIE_KEY = 'chip-rotation';
 function getCookieRotation(): number {
@@ -25,7 +26,7 @@ export function ChipView() {
   const [rotation, setRotation] = useState(() => getCookieRotation());
 
   const { top, bottom, left, right } = useMemo(() => {
-    if (!config) return { top: [] as typeof config.pins, bottom: [] as typeof config.pins, left: [] as typeof config.pins, right: [] as typeof config.pins };
+    if (!config) return { top: [] as PinConfig[], bottom: [] as PinConfig[], left: [] as PinConfig[], right: [] as PinConfig[] };
     const original = groupPins(config.pins);
     return rotateLayout(original, rotation);
   }, [config, rotation]);

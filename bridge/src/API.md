@@ -149,7 +149,7 @@ CMD_THREAD_PASSTHROUGH = 0x40      # Forward to Thread device
 ```python
 CMD_BLE_ENABLE_PAIRING = 0x50      # Start pairing mode
 CMD_BLE_DISABLE_PAIRING = 0x51     # Stop pairing mode
-CMD_BLE_GET_PEERS = 0x52           # List connected devices
+CMD_BLE_GET_IN_RANGE = 0x52        # List devices currently in range
 CMD_BLE_START_SCAN = 0x53          # Enable RSSI monitoring
 CMD_BLE_STOP_SCAN = 0x54           # Disable RSSI monitoring
 ```
@@ -183,9 +183,9 @@ EVENT_PORT_STATUS = 0x50           # Port status reply
 EVENT_GPIO_STATUS = 0x51           # GPIO config snapshot (sync)
 EVENT_BLE_PAIRING_ENABLED = 0x60   # PIN + timeout
 EVENT_BLE_PAIRING_DISABLED = 0x61  # reason
-EVENT_BLE_PEER_CONNECTED = 0x62    # peer connected
-EVENT_BLE_PEER_DISCONNECTED = 0x63 # peer disconnected
-EVENT_BLE_PEERS_LIST = 0x64        # peer list
+EVENT_BLE_DEVICE_IN_RANGE = 0x62     # device entered range
+EVENT_BLE_DEVICE_OUT_OF_RANGE = 0x63 # device left range
+EVENT_BLE_IN_RANGE_LIST = 0x64       # in-range device list
 EVENT_BLE_RSSI = 0x65              # periodic RSSI
 EVENT_SYNC_RESPONSE = 0x66         # state snapshot reply
 EVENT_BLE_STATUS = 0x67            # BLE state snapshot (sync)
@@ -336,8 +336,8 @@ class CommandDispatcher:
     def ble_disable_pairing() -> Optional[int]:
         """Disable BLE pairing mode. Returns command ID or None on error."""
 
-    def ble_get_peers() -> Optional[int]:
-        """List connected BLE peers. Returns command ID or None on error."""
+    def ble_get_in_range() -> Optional[int]:
+        """List BLE devices currently in range. Returns command ID or None on error."""
 
     def ble_start_scan(interval_s: int = 5) -> Optional[int]:
         """Start RSSI scanning. Returns command ID or None on error."""
@@ -384,9 +384,9 @@ EVENT_ERROR            # Command error
 # BLE events
 EVENT_BLE_PAIRING_ENABLED      # Pairing started
 EVENT_BLE_PAIRING_DISABLED     # Pairing stopped
-EVENT_BLE_PEER_CONNECTED       # Device connected
-EVENT_BLE_PEER_DISCONNECTED    # Device disconnected
-EVENT_BLE_PEERS_LIST           # Connected peers list
+EVENT_BLE_DEVICE_IN_RANGE      # Device entered range
+EVENT_BLE_DEVICE_OUT_OF_RANGE # Device left range
+EVENT_BLE_IN_RANGE_LIST        # In-range device list
 EVENT_BLE_RSSI                 # RSSI measurement
 
 # System
@@ -455,8 +455,8 @@ class IoTAgentClient:
     def enable_ble_pairing(timeout_s: int = 60) -> bool:
         """Enable BLE pairing mode."""
 
-    def get_ble_peers() -> Optional[List[Tuple[bytes, int]]]:
-        """Get list of connected BLE peers (MAC, RSSI)."""
+    def get_ble_in_range() -> Optional[List[dict]]:
+        """Get BLE devices currently in range (MAC, RSSI)."""
 
     def start_ble_scan(interval_s: int = 5) -> bool:
         """Start BLE RSSI monitoring."""
@@ -524,10 +524,10 @@ print(f"Received: {response.decode()}")
 client.enable_ble_pairing(timeout_s=60)
 print("Pairing enabled for 60 seconds...")
 
-# After peer connects
-peers = client.get_ble_peers()
-for mac, rssi in peers:
-    print(f"Peer {mac.hex()}: RSSI {rssi} dBm")
+# Query devices currently in range
+devices = client.get_ble_in_range()
+for device in devices:
+    print(f"Device {device['mac'].hex()}: RSSI {device['rssi']} dBm")
 ```
 
 ---

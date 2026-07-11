@@ -222,12 +222,12 @@ class EventHandler:
                 return EventBlePairingEnabled.from_bytes(data)
             elif opcode == EVENT_BLE_PAIRING_DISABLED:
                 return EventBlePairingDisabled.from_bytes(data)
-            elif opcode == EVENT_BLE_PEERS_LIST:
-                return EventBlePeersList.from_bytes(data)
-            elif opcode == EVENT_BLE_PEER_CONNECTED:
-                return EventBlePeerConnected.from_bytes(data)
-            elif opcode == EVENT_BLE_PEER_DISCONNECTED:
-                return EventBlePeerDisconnected.from_bytes(data)
+            elif opcode == EVENT_BLE_IN_RANGE_LIST:
+                return EventBleInRangeList.from_bytes(data)
+            elif opcode == EVENT_BLE_DEVICE_IN_RANGE:
+                return EventBleDeviceInRange.from_bytes(data)
+            elif opcode == EVENT_BLE_DEVICE_OUT_OF_RANGE:
+                return EventBleDeviceOutOfRange.from_bytes(data)
             elif opcode == EVENT_BLE_RSSI:
                 return EventBleRssi.from_bytes(data)
             elif opcode == EVENT_HEARTBEAT:

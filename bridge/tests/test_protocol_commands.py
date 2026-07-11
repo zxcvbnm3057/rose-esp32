@@ -28,7 +28,7 @@ from ..src.protocol import (
     CMD_SYN,
     CMD_BLE_ENABLE_PAIRING,
     CMD_BLE_DISABLE_PAIRING,
-    CMD_BLE_GET_PEERS,
+    CMD_BLE_GET_IN_RANGE,
     CMD_BLE_START_SCAN,
     CMD_BLE_STOP_SCAN,
     CMD_HEARTBEAT,
@@ -53,7 +53,7 @@ from ..src.protocol import (
     CmdHeartbeat,
     CmdBleEnablePairing,
     CmdBleDisablePairing,
-    CmdBleGetPeers,
+    CmdBleGetInRange,
     CmdBleStartScan,
     CmdBleStopScan,
     RESOURCE_GPIO,
@@ -86,7 +86,7 @@ def test_opcode_values():
     assert CMD_SYN == 0x02
     assert CMD_BLE_ENABLE_PAIRING == 0x50
     assert CMD_BLE_DISABLE_PAIRING == 0x51
-    assert CMD_BLE_GET_PEERS == 0x52
+    assert CMD_BLE_GET_IN_RANGE == 0x52
     assert CMD_BLE_START_SCAN == 0x53
     assert CMD_BLE_STOP_SCAN == 0x54
     assert CMD_HEARTBEAT == 0xFE
@@ -282,8 +282,8 @@ def test_ble_disable_pairing_layout():
     assert cmd.to_bytes() == struct.pack('<B', 2)
 
 
-def test_ble_get_peers_empty():
-    assert CmdBleGetPeers().to_bytes() == b''
+def test_ble_get_in_range_empty():
+    assert CmdBleGetInRange().to_bytes() == b''
 
 
 def test_ble_start_scan_layout():

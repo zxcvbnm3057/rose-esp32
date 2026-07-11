@@ -37,11 +37,12 @@
 #define CMD_THREAD_PASSTHROUGH 0x40
 #define CMD_BLE_ENABLE_PAIRING 0x50
 #define CMD_BLE_DISABLE_PAIRING 0x51
-#define CMD_BLE_GET_PEERS 0x52
+#define CMD_BLE_GET_IN_RANGE 0x52
 #define CMD_SYNC_REQUEST 0x01
 #define CMD_SYN 0x02
 #define CMD_BLE_START_SCAN 0x53
 #define CMD_BLE_STOP_SCAN 0x54
+#define CMD_BLE_DELETE_BOND 0x55
 #define CMD_HEARTBEAT 0xFE
 #define CMD_PING 0xFF
 
@@ -58,9 +59,9 @@
 #define EVENT_PORT_STATUS 0x50
 #define EVENT_BLE_PAIRING_ENABLED 0x60
 #define EVENT_BLE_PAIRING_DISABLED 0x61
-#define EVENT_BLE_PEER_CONNECTED 0x62
-#define EVENT_BLE_PEER_DISCONNECTED 0x63
-#define EVENT_BLE_PEERS_LIST 0x64
+#define EVENT_BLE_DEVICE_IN_RANGE 0x62
+#define EVENT_BLE_DEVICE_OUT_OF_RANGE 0x63
+#define EVENT_BLE_IN_RANGE_LIST 0x64
 #define EVENT_BLE_RSSI 0x65
 #define EVENT_BLE_STATUS 0x67 // BLE state for sync
 #define EVENT_ERROR 0xFE
@@ -224,12 +225,17 @@ typedef struct
 typedef struct
 {
     uint8_t dummy;
-} cmd_ble_get_peers_t;
+} cmd_ble_get_in_range_t;
 
 typedef struct
 {
     uint32_t interval_s;
 } cmd_ble_start_scan_t;
+
+typedef struct
+{
+    uint8_t device_mac[6];
+} cmd_ble_delete_bond_t;
 
 typedef struct
 {
@@ -371,25 +377,25 @@ typedef struct
 
 typedef struct
 {
-    uint8_t peer_mac[6];
+    uint8_t device_mac[6];
     int8_t rssi;
-} event_ble_peer_connected_t;
+} event_ble_device_in_range_t;
 
 typedef struct
 {
-    uint8_t peer_mac[6];
+    uint8_t device_mac[6];
     uint8_t reason;
-} event_ble_peer_disconnected_t;
+} event_ble_device_out_of_range_t;
 
 typedef struct __attribute__((packed))
 {
     uint16_t cmd_id; // originating host command id (0 if unsolicited)
-    uint8_t peer_count;
-} event_ble_peers_list_t;
+    uint8_t device_count;
+} event_ble_in_range_list_t;
 
 typedef struct
 {
-    uint8_t peer_mac[6];
+    uint8_t device_mac[6];
     int8_t rssi;
     int64_t timestamp_us;
 } event_ble_rssi_t;
@@ -399,7 +405,7 @@ typedef struct __attribute__((packed))
 {
     uint8_t pairing_enabled;
     uint8_t scan_enabled;
-    uint8_t peer_count;
+    uint8_t device_count;
     uint32_t pairing_timeout_s;
 } event_ble_status_t;
 
@@ -439,22 +445,23 @@ typedef struct
     uint8_t metadata[64];
 } thread_device_t;
 
+#define IN_RANGE_MAX 16
 typedef struct
 {
-    uint8_t peer_mac[6];
+    uint8_t device_mac[6]; // identity address of the in-range device
     int8_t rssi;
-    uint16_t conn_handle;
+    uint16_t conn_handle; // valid only for connected (Android) devices; 0xFFFF if beacon-only
     uint32_t conn_time_s;
-    uint8_t in_use;         // slot occupied (pre-allocated or encrypted)
-    uint8_t encrypted;      // 1 = encryption complete, peer fully connected
-    uint32_t last_active_s; // last activity timestamp for LRU eviction
-} ble_peer_t;
+    uint8_t in_use;         // slot occupied
+    uint8_t active;         // 1 = currently in range (within timeout window)
+    uint32_t last_active_s; // last time we saw a heartbeat (connected) or resolved adv (iOS)
+} ble_in_range_device_t;
 
 // Global variables externs
 extern gpio_status_t gpio_table[31];
 extern uart_status_t uart_table[IOT_UART_NUM_MAX];
 extern thread_device_t thread_table[16]; // Max 16 devices
-int ble_encrypted_peer_count(void);
+int ble_in_range_device_count(void);
 extern QueueHandle_t cmd_queue;
 extern QueueHandle_t send_queue;
 extern SemaphoreHandle_t resource_mutex;
@@ -539,8 +546,9 @@ void ble_manager_init(void);
 void ble_rssi_task(void *pvParameters);
 void ble_enable_pairing(uint16_t cmd_id, uint32_t timeout_s);
 void ble_disable_pairing(void);
-void ble_get_peers_list(ble_peer_t *peers, int *peer_count);
+void ble_get_in_range_devices(ble_in_range_device_t *devices, int *device_count);
 void ble_start_rssi_scan(uint32_t interval_s);
 void ble_stop_rssi_scan(void);
+int ble_delete_bond(const uint8_t device_mac[6]);
 
 #endif // IOT_AGENT_H

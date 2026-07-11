@@ -120,51 +120,51 @@ export function useWebSocket() {
                         store.setBleState({
                             pairingEnabled: (s.pairing_enabled as number) === 1,
                             scanEnabled: (s.scan_enabled as number) === 1,
-                            peerCount: (s.peer_count as number) ?? 0,
+                            deviceCount: (s.device_count as number) ?? 0,
                         });
                         break;
                     }
                     case 'ble_pairing_enabled': {
                         const pin = msg.pin_code as string ?? '';
                         if (pin) {
-                            store.setBleState({ pairingEnabled: true, scanEnabled: store.bleState.scanEnabled, peerCount: store.bleState.peerCount });
+                            store.setBleState({ pairingEnabled: true, scanEnabled: store.bleState.scanEnabled, deviceCount: store.bleState.deviceCount });
                         }
                         break;
                     }
                     case 'ble_pairing_disabled':
-                        store.setBleState({ pairingEnabled: false, scanEnabled: store.bleState.scanEnabled, peerCount: store.bleState.peerCount });
+                        store.setBleState({ pairingEnabled: false, scanEnabled: store.bleState.scanEnabled, deviceCount: store.bleState.deviceCount });
                         break;
-                    case 'ble_peers_list': {
-                        const peers = (msg.peers as Array<{ mac: string; rssi: number }>) ?? [];
-                        store.setBlePeers(peers);
-                        store.setBleState({ peerCount: peers.length });
+                    case 'ble_in_range_list': {
+                        const devices = (msg.devices as Array<{ mac: string; rssi: number }>) ?? [];
+                        store.setBleDevices(devices);
+                        store.setBleState({ deviceCount: devices.length });
                         break;
                     }
-                    case 'ble_peer_connected': {
+                    case 'ble_device_in_range': {
                         const mac = msg.mac as string ?? '';
                         const rssi = msg.rssi as number ?? 0;
                         if (mac) {
-                            store.upsertBlePeer(mac, rssi);
-                            // Update peerCount from actual peers array length
-                            const currentPeers = useDeviceStore.getState().blePeers;
-                            store.setBleState({ peerCount: currentPeers.length });
+                            store.upsertBleDevice(mac, rssi);
+                            // Update deviceCount from actual devices array length
+                            const currentDevices = useDeviceStore.getState().bleDevices;
+                            store.setBleState({ deviceCount: currentDevices.length });
                         }
                         break;
                     }
-                    case 'ble_peer_disconnected': {
+                    case 'ble_device_out_of_range': {
                         const mac = msg.mac as string ?? '';
                         if (mac) {
-                            store.removeBlePeer(mac);
-                            // Update peerCount from actual peers array length
-                            const currentPeers = useDeviceStore.getState().blePeers;
-                            store.setBleState({ peerCount: currentPeers.length });
+                            store.removeBleDevice(mac);
+                            // Update deviceCount from actual devices array length
+                            const currentDevices = useDeviceStore.getState().bleDevices;
+                            store.setBleState({ deviceCount: currentDevices.length });
                         }
                         break;
                     }
                     case 'ble_rssi': {
                         const mac = msg.mac as string ?? '';
                         const rssi = msg.rssi as number ?? 0;
-                        if (mac && rssi != null) store.upsertBlePeer(mac, rssi);
+                        if (mac && rssi != null) store.upsertBleDevice(mac, rssi);
                         break;
                     }
 

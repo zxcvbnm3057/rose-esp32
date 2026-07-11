@@ -53,8 +53,8 @@ async def start_bridge():
         EVENT_GPIO_SIGNAL_CAPTURED, EVENT_UART_RX,
         EVENT_UART_STATUS, EVENT_GPIO_STATUS, EVENT_BLE_STATUS,
         EVENT_PORT_STATUS, EVENT_BLE_PAIRING_ENABLED, EVENT_BLE_PAIRING_DISABLED,
-        EVENT_BLE_PEER_CONNECTED, EVENT_BLE_PEER_DISCONNECTED,
-        EVENT_BLE_PEERS_LIST, EVENT_BLE_RSSI,
+        EVENT_BLE_DEVICE_IN_RANGE, EVENT_BLE_DEVICE_OUT_OF_RANGE,
+        EVENT_BLE_IN_RANGE_LIST, EVENT_BLE_RSSI,
         EVENT_HEARTBEAT, EVENT_ERROR, EVENT_CMD_ACK, EVENT_SYNC_RESPONSE,
     )
 
@@ -77,9 +77,9 @@ async def start_bridge():
     handler.register_callback(EVENT_PORT_STATUS, make_callback("port_status"))
     handler.register_callback(EVENT_BLE_PAIRING_ENABLED, make_callback("ble_pairing_enabled"))
     handler.register_callback(EVENT_BLE_PAIRING_DISABLED, make_callback("ble_pairing_disabled"))
-    handler.register_callback(EVENT_BLE_PEER_CONNECTED, make_callback("ble_peer_connected"))
-    handler.register_callback(EVENT_BLE_PEER_DISCONNECTED, make_callback("ble_peer_disconnected"))
-    handler.register_callback(EVENT_BLE_PEERS_LIST, make_callback("ble_peers_list"))
+    handler.register_callback(EVENT_BLE_DEVICE_IN_RANGE, make_callback("ble_device_in_range"))
+    handler.register_callback(EVENT_BLE_DEVICE_OUT_OF_RANGE, make_callback("ble_device_out_of_range"))
+    handler.register_callback(EVENT_BLE_IN_RANGE_LIST, make_callback("ble_in_range_list"))
     handler.register_callback(EVENT_BLE_RSSI, make_callback("ble_rssi"))
     handler.register_callback(EVENT_HEARTBEAT, make_callback("heartbeat"))
     handler.register_callback(EVENT_ERROR, make_callback("error"))
@@ -117,15 +117,15 @@ def _event_to_dict(event_type: str, event: Any) -> Optional[dict]:
             return {"pin_code": getattr(event, "pin_code", b"").decode() if hasattr(event, "pin_code") else "", "timeout_s": getattr(event, "timeout_s", 0)}
         if event_type == "ble_pairing_disabled":
             return {"reason": getattr(event, "reason", 0)}
-        if event_type == "ble_peer_connected":
-            return {"mac": _mac_rev(getattr(event, "peer_mac", b"")), "rssi": getattr(event, "rssi", 0)}
-        if event_type == "ble_peer_disconnected":
-            return {"mac": _mac_rev(getattr(event, "peer_mac", b"")), "reason": getattr(event, "reason", 0)}
-        if event_type == "ble_peers_list":
-            peers = [{"mac": _mac_rev(mac) if isinstance(mac, bytes) else str(mac), "rssi": rssi} for mac, rssi in (getattr(event, "peers", []) or [])]
-            return {"peers": peers, "peer_count": len(peers)}
+        if event_type == "ble_device_in_range":
+            return {"mac": _mac_rev(getattr(event, "device_mac", b"")), "rssi": getattr(event, "rssi", 0)}
+        if event_type == "ble_device_out_of_range":
+            return {"mac": _mac_rev(getattr(event, "device_mac", b"")), "reason": getattr(event, "reason", 0)}
+        if event_type == "ble_in_range_list":
+            devices = [{"mac": _mac_rev(mac) if isinstance(mac, bytes) else str(mac), "rssi": rssi} for mac, rssi in (getattr(event, "devices", []) or [])]
+            return {"devices": devices, "device_count": len(devices)}
         if event_type == "ble_rssi":
-            return {"mac": _mac_rev(getattr(event, "peer_mac", b"")), "rssi": getattr(event, "rssi", 0)}
+            return {"mac": _mac_rev(getattr(event, "device_mac", b"")), "rssi": getattr(event, "rssi", 0)}
         if event_type == "heartbeat":
             return {"connection_state": getattr(event, "connection_state", 0)}
         if event_type == "error":
@@ -151,7 +151,7 @@ def _event_to_dict(event_type: str, event: Any) -> Optional[dict]:
             return {
                 "pairing_enabled": event.pairing_enabled,
                 "scan_enabled": event.scan_enabled,
-                "peer_count": event.peer_count,
+                "device_count": event.device_count,
                 "pairing_timeout_s": event.pairing_timeout_s,
             }
     except Exception:
@@ -311,8 +311,8 @@ async def ble_disable_pairing() -> bool:
     return await _run_sync(get_client().disable_ble_pairing)
 
 
-async def ble_get_peers() -> Optional[list]:
-    raw = await _run_sync(get_client().get_ble_peers)
+async def ble_get_in_range() -> Optional[list]:
+    raw = await _run_sync(get_client().get_ble_in_range)
     if not raw:
         return []
     result = []
@@ -340,6 +340,10 @@ async def ble_start_scan(interval_s: int = 5) -> bool:
 
 async def ble_stop_scan() -> bool:
     return await _run_sync(get_client().stop_ble_scan)
+
+
+async def ble_delete_bond(device_mac: bytes) -> bool:
+    return await _run_sync(get_client().delete_ble_bond, device_mac)
 
 
 async def ping() -> bool:

@@ -101,8 +101,8 @@ export const api = {
         request('/ble/pairing/enable', { method: 'POST', body: JSON.stringify({ timeout_s }) }),
     blePairingDisable: () =>
         request('/ble/pairing/disable', { method: 'POST' }),
-    blePeers: () =>
-        request('/ble/peers'),
+    bleInRange: () =>
+        request('/ble/in-range'),
     bleScanStart: (interval_s = 5) =>
         request('/ble/scan/start', { method: 'POST', body: JSON.stringify({ interval_s }) }),
     bleScanStop: () =>
@@ -118,6 +118,8 @@ export const api = {
         }),
     deleteBleDeviceName: (mac: string) =>
         request('/ble/device-names/' + encodeURIComponent(mac), { method: 'DELETE' }),
+    deleteBlePairedDevice: (mac: string) =>
+        request('/ble/paired-devices/' + encodeURIComponent(mac), { method: 'DELETE' }),
 
     // ── System ────────────────────────────────────────
     ping: () =>
