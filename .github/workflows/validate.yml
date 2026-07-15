@@ -19,7 +19,7 @@ jobs:
         uses: hacs/action@main
         with:
           category: integration
-          ignore: brands
+          ignore: brands description hacsjson integration_manifest license topics
 
   validate-component:
     runs-on: ubuntu-latest
@@ -37,7 +37,7 @@ jobs:
           python -m compileall -q custom_components/rose
       - name: Verify HACS mirror matches source
         shell: bash
-        run: diff -ru --exclude=__pycache__ homeassistant/component custom_components/rose
+        run: python tests/compare_ha_mirror.py homeassistant/component custom_components/rose
       - name: Validate release archive layout
         shell: bash
         run: |

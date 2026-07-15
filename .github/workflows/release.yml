@@ -41,7 +41,7 @@ jobs:
       - name: Build HACS archive
         shell: bash
         run: |
-          diff -ru --exclude=__pycache__ homeassistant/component custom_components/rose
+          python tests/compare_ha_mirror.py homeassistant/component custom_components/rose
           mkdir -p release
           cp -R custom_components/rose/. release/
           find release -type d -name __pycache__ -prune -exec rm -rf {} +
