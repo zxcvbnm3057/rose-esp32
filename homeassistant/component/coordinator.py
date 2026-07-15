@@ -12,10 +12,26 @@ from .client import RoseApiError, RoseClient
 from .const import EVENT_BLE_PRESENCE
 
 LOGGER = logging.getLogger(__name__)
+WS_RECONNECT_MAX_DELAY = 30
 
 
 def normalize_mac(value: str) -> str:
     return value.strip().replace("-", ":").lower()
+
+
+def next_reconnect_delay(current: int) -> int:
+    return min(current * 2, WS_RECONNECT_MAX_DELAY)
+
+
+def connection_changed(data: dict | None, connected: bool) -> dict:
+    updated = dict(data or {})
+    updated["connected"] = connected
+    if not connected:
+        updated["ble"] = {
+            mac: {**state, "home": False, "rssi": None}
+            for mac, state in updated.get("ble", {}).items()
+        }
+    return updated
 
 
 class RoseCoordinator(DataUpdateCoordinator[dict]):
@@ -72,18 +88,27 @@ class RoseCoordinator(DataUpdateCoordinator[dict]):
             self._ws_task = None
 
     async def _websocket_loop(self) -> None:
+        reconnect_delay = 1
         while True:
             try:
                 async for event in self.client.websocket_messages():
+                    reconnect_delay = 1
                     self._handle_ble_event(event)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 LOGGER.debug("Rose WebSocket disconnected: %s", exc)
-            await asyncio.sleep(5)
+            await self.async_request_refresh()
+            await asyncio.sleep(reconnect_delay)
+            reconnect_delay = next_reconnect_delay(reconnect_delay)
 
     def _handle_ble_event(self, event: dict) -> None:
         event_type = event.get("type")
+        if event_type == "connection_change":
+            connected = bool(event.get("connected"))
+            self.async_set_updated_data(connection_changed(self.data, connected))
+            self.hass.async_create_task(self.async_request_refresh())
+            return
         if event_type == "ble_in_range_list":
             devices = {
                 normalize_mac(device["mac"]): device

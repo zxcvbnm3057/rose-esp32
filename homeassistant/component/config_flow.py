@@ -21,6 +21,14 @@ async def _validate_platform(hass, url: str) -> None:
     await client.hardware_config()
 
 
+def _is_valid_key(key: str) -> bool:
+    try:
+        cv.slug(key)
+    except vol.Invalid:
+        return False
+    return True
+
+
 class RoseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
@@ -126,14 +134,16 @@ class RoseOptionsFlow(config_entries.OptionsFlow):
         errors = {}
         if user_input is not None:
             key = existing_key or user_input.pop(CONF_KEY)
-            if existing_key is None and key in devices:
+            if not _is_valid_key(key):
+                errors[CONF_KEY] = "invalid_key"
+            elif existing_key is None and key in devices:
                 errors[CONF_KEY] = "already_exists"
             else:
                 devices[key] = {"protocol": "tcl", **user_input}
                 return self.async_create_entry(title="", data=self._options)
         schema = {}
         if existing_key is None:
-            schema[vol.Required(CONF_KEY, default="")] = cv.slug
+            schema[vol.Required(CONF_KEY, default="")] = str
         schema.update(
             {
                 vol.Required(CONF_NAME, default=current.get(CONF_NAME, "")): cv.string,
@@ -163,7 +173,9 @@ class RoseOptionsFlow(config_entries.OptionsFlow):
         errors = {}
         if user_input is not None:
             key = existing_key or user_input.pop(CONF_KEY)
-            if existing_key is None and key in devices:
+            if not _is_valid_key(key):
+                errors[CONF_KEY] = "invalid_key"
+            elif existing_key is None and key in devices:
                 errors[CONF_KEY] = "already_exists"
             else:
                 try:
@@ -176,11 +188,13 @@ class RoseOptionsFlow(config_entries.OptionsFlow):
                     return self.async_create_entry(title="", data=self._options)
         schema = {}
         if existing_key is None:
-            schema[vol.Required(CONF_KEY, default="")] = cv.slug
+            schema[vol.Required(CONF_KEY, default="")] = str
         schema.update(
             {
                 vol.Required(CONF_NAME, default=current.get(CONF_NAME, "")): cv.string,
-                vol.Required("uart_id", default=current.get("uart_id", 1)): cv.non_negative_int,
+                vol.Required("uart_id", default=current.get("uart_id", 1)): vol.All(
+                    vol.Coerce(int), vol.Range(min=0)
+                ),
                 vol.Required("on", default=current.get("on", "")): cv.string,
                 vol.Required("off", default=current.get("off", "")): cv.string,
             }

@@ -5,7 +5,7 @@ import base64
 import json
 from typing import Any
 
-from aiohttp import ClientError, ClientSession
+from aiohttp import ClientError, ClientSession, ClientTimeout
 
 
 class RoseApiError(RuntimeError):
@@ -13,11 +13,18 @@ class RoseApiError(RuntimeError):
 
 
 class RoseClient:
-    def __init__(self, session: ClientSession, base_url: str) -> None:
+    def __init__(
+        self,
+        session: ClientSession,
+        base_url: str,
+        request_timeout: float = 10,
+    ) -> None:
         self._session = session
         self._base_url = base_url.rstrip("/")
+        self._request_timeout = ClientTimeout(total=request_timeout)
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        kwargs.setdefault("timeout", self._request_timeout)
         try:
             async with self._session.request(method, f"{self._base_url}{path}", **kwargs) as response:
                 body = await response.json(content_type=None)
@@ -54,13 +61,20 @@ class RoseClient:
 
     async def websocket_messages(self):
         ws_url = self._base_url.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
-        async with self._session.ws_connect(f"{ws_url}/ws?role=app", heartbeat=30) as websocket:
+        async with self._session.ws_connect(
+            f"{ws_url}/ws?role=app",
+            heartbeat=30,
+            timeout=self._request_timeout.total,
+        ) as websocket:
             async for message in websocket:
-                if message.type.name == "TEXT":
-                    try:
-                        yield json.loads(message.data)
-                    except (TypeError, json.JSONDecodeError):
-                        continue
+                if message.type.name != "TEXT":
+                    continue
+                try:
+                    payload = json.loads(message.data)
+                except (TypeError, json.JSONDecodeError):
+                    continue
+                if isinstance(payload, dict):
+                    yield payload
 
     async def signal_tx(
         self,

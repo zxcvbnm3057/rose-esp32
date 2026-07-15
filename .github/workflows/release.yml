@@ -31,7 +31,7 @@ jobs:
           TAG="$REQUESTED_TAG"
           case "$TAG" in v*) ;; *) echo "Tag must start with v" >&2; exit 1 ;; esac
           VERSION="${TAG#v}"
-          MANIFEST_VERSION="$(python -c 'import json; print(json.load(open("custom_components/rose/manifest.json"))["version"])')"
+          MANIFEST_VERSION="$(python -c 'import json; print(json.load(open("homeassistant/component/manifest.json"))["version"])')"
           test "$VERSION" = "$MANIFEST_VERSION" || {
             echo "Tag version $VERSION does not match manifest version $MANIFEST_VERSION" >&2
             exit 1
@@ -41,9 +41,8 @@ jobs:
       - name: Build HACS archive
         shell: bash
         run: |
-          python tests/compare_ha_mirror.py homeassistant/component custom_components/rose
           mkdir -p release
-          cp -R custom_components/rose/. release/
+          cp -R homeassistant/component/. release/
           find release -type d -name __pycache__ -prune -exec rm -rf {} +
           cd release
           zip -qr ../rose-home-assistant.zip .
