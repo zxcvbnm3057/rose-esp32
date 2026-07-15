@@ -28,7 +28,10 @@ async def signal_tx(gpio: int = Path(...), req: SignalTxRequest = None):
     _validate_carrier(req.carrier_hz, req.duty_cycle)
 
     signal_list = [{"level": s.level, "duration_us": s.duration_us} for s in req.signal]
-    ok = await bridge_service.signal_tx(gpio, signal_list, req.delay_us, req.carrier_hz, req.duty_cycle)
+    ok = await bridge_service.signal_tx(
+        gpio, signal_list, req.delay_us, req.carrier_hz, req.duty_cycle,
+        req.repeat, req.repeat_gap_us,
+    )
     check_bridge_ok(ok, "Signal TX failed")
     return ApiResponse(
         success=True,
@@ -37,6 +40,8 @@ async def signal_tx(gpio: int = Path(...), req: SignalTxRequest = None):
             "edges_sent": len(req.signal),
             "carrier_hz": req.carrier_hz,
             "duty_cycle": req.duty_cycle,
+            "repeat": req.repeat,
+            "repeat_gap_us": req.repeat_gap_us,
         },
         timestamp=time.time(),
     )

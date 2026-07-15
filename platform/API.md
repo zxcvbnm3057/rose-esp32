@@ -104,9 +104,15 @@
 - **可用范围**：`console`, `app`
 - **路径参数**：`gpio: int`
 - **请求体**：
-  - `signal: [{ level, duration_us }]`（最多 256 段）
+  - `signal: [{ level, duration_us }]`（最多 256 段；每段 `1..32767us`）
   - `delay_us: int`
-- **返回 `data`**：`{ "gpio": int, "edges_sent": int }`
+  - `carrier_hz: int`（`0..500000`，`0` 表示不启用载波）
+  - `duty_cycle: float`（`0 < value <= 1`）
+  - `repeat: int`（`1..100`，默认 `1`，表示总发送次数）
+  - `repeat_gap_us: int`（`0..100000`，默认 `0`，仅作用于相邻两次发送之间）
+- **返回 `data`**：`{ "gpio": int, "edges_sent": int, "carrier_hz": int, "duty_cycle": float, "repeat": int, "repeat_gap_us": int }`
+- **备注**：完整重复组由 ESP32 在一次命令内执行，全部发送完成后才返回 ACK；最后一次发送后不等待 `repeat_gap_us`。
+- **总时长限制**：`repeat * sum(duration_us) + (repeat - 1) * repeat_gap_us` 不得超过 30 秒。
 
 ### POST `/api/v1/gpio/{gpio}/signal/rx`
 - **功能**：采集波形边沿
@@ -397,27 +403,29 @@
 |----|----------|----------|------|
 | `gpio_get` | `read` | `app`, `console` | 读取 GPIO |
 | `adc_sample` | `read` | `app`, `console` | 读取 ADC |
-| `signal_tx` | `read` | `app`, `console` | 输出微秒级波形 |
+| `signal_tx` | `control` | `console` | 输出微秒级波形 |
 | `signal_rx` | `read` | `app`, `console` | 采集波形 |
-| `signal_exchange` | `read` | `app`, `console` | 发送并采集波形 |
-| `uart_send` | `read` | `app`, `console` | 发送 UART 数据 |
-| `thread_passthrough` | `read` | `app`, `console` | Thread 原始透传 |
+| `signal_exchange` | `control` | `console` | 发送并采集波形 |
+| `uart_send` | `control` | `console` | 发送 UART 数据 |
+| `thread_passthrough` | `control` | `console` | Thread 原始透传 |
 | `gpio_set` | `control` | `console` | 设置 GPIO 输出 |
 
 > 未登记命令（如 `gpio_config`、BLE 配对开关、pins 管理、status 类查询）一律返回 `Unknown or unsupported WS op`。
+
+`signal_tx` 的 WS 消息支持与 REST 相同的 `signal`、`delay_us`、`carrier_hz`、`duty_cycle`、`repeat` 和 `repeat_gap_us` 字段；未提供重复参数时分别默认为 `1` 和 `0`。
 
 ### 11.3 app 在 WS 上的能力边界
 
 - **允许**：
   - `gpio_get`
   - `adc_sample`
-  - `signal_tx` / `signal_rx` / `signal_exchange`
-  - `uart_send`
-  - `thread_passthrough`
+  - `signal_rx`
   - BLE peer 列表与 peer 变化事件订阅
   - `uart_rx` 事件接收 UART 数据
 - **不允许**：
   - `gpio_set`
+  - `signal_tx` / `signal_exchange`
+  - `uart_send` / `thread_passthrough`
   - GPIO/UART 配置与 port bind/unbind
   - BLE 配对/扫描控制
   - `pins` 体系

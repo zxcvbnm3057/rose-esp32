@@ -165,8 +165,9 @@ void gpio_signal_tx_task(void *pvParameters)
     {
         if (xQueueReceive(get_signal_tx_queue(), &item, portMAX_DELAY) == pdTRUE)
         {
-            ESP_LOGI(TAG, "TX: GPIO %d, signal_len %d, delay_us %d",
-                     item.gpio, item.signal_len, item.delay_us);
+            ESP_LOGI(TAG, "TX: GPIO %d, signal_len %d, repeat %u, gap_us %lu, delay_us %d",
+                     item.gpio, item.signal_len, item.repeat,
+                     (unsigned long)item.repeat_gap_us, item.delay_us);
 
             bool carrier_enabled = item.carrier_hz > 0;
             if (carrier_enabled)
@@ -276,47 +277,51 @@ void gpio_signal_tx_task(void *pvParameters)
                     continue;
                 }
 
-                // Transmit in chunks (each chunk ≤ max_chunk RMT items)
-                int edges_sent = 0;
                 bool write_failed = false;
-                while (edges_sent < max_signal_len)
+                for (uint16_t repetition = 0; repetition < item.repeat && !write_failed; repetition++)
                 {
-                    int chunk_edges = max_signal_len - edges_sent;
-                    int chunk_count = (chunk_edges + 1) / 2;
-                    if (chunk_count > max_chunk)
-                        chunk_count = max_chunk;
-                    // Recalculate edges from items for this chunk
-                    chunk_edges = chunk_count * 2;
-                    if (chunk_edges > max_signal_len - edges_sent)
-                        chunk_edges = max_signal_len - edges_sent;
-
-                    // Build chunk_count items from signal data
-                    for (int i = 0; i < chunk_count; i++)
+                    int edges_sent = 0;
+                    while (edges_sent < max_signal_len)
                     {
-                        int edge_idx = edges_sent + i * 2;
-                        uint8_t level0 = data[edge_idx * 5];
-                        uint32_t duration0 = *(uint32_t *)&data[edge_idx * 5 + 1];
-                        uint8_t level1 = 0;
-                        uint32_t duration1 = 0;
-                        if (edge_idx + 1 < max_signal_len)
+                        int chunk_edges = max_signal_len - edges_sent;
+                        int chunk_count = (chunk_edges + 1) / 2;
+                        if (chunk_count > max_chunk)
+                            chunk_count = max_chunk;
+                        chunk_edges = chunk_count * 2;
+                        if (chunk_edges > max_signal_len - edges_sent)
+                            chunk_edges = max_signal_len - edges_sent;
+
+                        for (int i = 0; i < chunk_count; i++)
                         {
-                            level1 = data[(edge_idx + 1) * 5];
-                            duration1 = *(uint32_t *)&data[(edge_idx + 1) * 5 + 1];
+                            int edge_idx = edges_sent + i * 2;
+                            uint8_t level0 = data[edge_idx * 5];
+                            uint32_t duration0 = *(uint32_t *)&data[edge_idx * 5 + 1];
+                            uint8_t level1 = 0;
+                            uint32_t duration1 = 0;
+                            if (edge_idx + 1 < max_signal_len)
+                            {
+                                level1 = data[(edge_idx + 1) * 5];
+                                duration1 = *(uint32_t *)&data[(edge_idx + 1) * 5 + 1];
+                            }
+                            chunk_buf[i].level0 = level0;
+                            chunk_buf[i].duration0 = duration0;
+                            chunk_buf[i].level1 = level1;
+                            chunk_buf[i].duration1 = duration1;
                         }
-                        chunk_buf[i].level0 = level0;
-                        chunk_buf[i].duration0 = duration0;
-                        chunk_buf[i].level1 = level1;
-                        chunk_buf[i].duration1 = duration1;
-                    }
 
-                    esp_err_t write_ret = rmt_write_items(tx_config.channel, chunk_buf, chunk_count, true);
-                    if (write_ret != ESP_OK)
-                    {
-                        ESP_LOGE(TAG, "rmt_write_items chunk failed: %d (count=%d)", write_ret, chunk_count);
-                        write_failed = true;
-                        break;
+                        esp_err_t write_ret = rmt_write_items(tx_config.channel, chunk_buf, chunk_count, true);
+                        if (write_ret != ESP_OK)
+                        {
+                            ESP_LOGE(TAG, "rmt_write_items chunk failed: %d (count=%d)", write_ret, chunk_count);
+                            write_failed = true;
+                            break;
+                        }
+                        edges_sent += chunk_edges;
                     }
-                    edges_sent += chunk_edges;
+                    if (!write_failed && repetition + 1 < item.repeat && item.repeat_gap_us > 0)
+                    {
+                        esp_rom_delay_us(item.repeat_gap_us);
+                    }
                 }
                 free(chunk_buf);
                 rmt_wait_tx_done(tx_config.channel, pdMS_TO_TICKS(1000));

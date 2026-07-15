@@ -509,17 +509,61 @@ void handle_command(msg_frame_t *frame)
 
     case CMD_GPIO_SIGNAL_TX:
     {
+        if (frame->length < 1 + sizeof(cmd_gpio_signal_tx_t))
+        {
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_INVALID_ARG, 0}, sizeof(event_cmd_ack_t));
+            break;
+        }
         cmd_gpio_signal_tx_t *cmd = (cmd_gpio_signal_tx_t *)&frame->payload[1];
         if (cmd->gpio >= 31 || gpio_table[cmd->gpio].mode != IOT_GPIO_MODE_SIGNAL)
         {
             send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_WRONG_MODE, 0}, sizeof(event_cmd_ack_t));
             break;
         }
+        if (cmd->repeat == 0 || cmd->repeat > 100 || cmd->repeat_gap_us > 100000)
+        {
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_INVALID_ARG, 0}, sizeof(event_cmd_ack_t));
+            break;
+        }
+
+        size_t fixed_size = 1 + sizeof(cmd_gpio_signal_tx_t);
+        size_t available_signal_bytes = frame->length - fixed_size;
+        if (cmd->signal_len > available_signal_bytes / 5 || available_signal_bytes != (size_t)cmd->signal_len * 5)
+        {
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_INVALID_ARG, 0}, sizeof(event_cmd_ack_t));
+            break;
+        }
+
+        uint8_t *payload_ptr = (uint8_t *)cmd + sizeof(cmd_gpio_signal_tx_t);
+        uint64_t signal_duration_us = 0;
+        for (uint16_t i = 0; i < cmd->signal_len; i++)
+        {
+            uint32_t duration_us;
+            memcpy(&duration_us, &payload_ptr[i * 5 + 1], sizeof(duration_us));
+            if (payload_ptr[i * 5] > 1 || duration_us == 0 || duration_us > 32767)
+            {
+                send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_INVALID_ARG, 0}, sizeof(event_cmd_ack_t));
+                signal_duration_us = UINT64_MAX;
+                break;
+            }
+            signal_duration_us += duration_us;
+        }
+        if (signal_duration_us == UINT64_MAX)
+        {
+            break;
+        }
+        uint64_t total_duration_us = signal_duration_us * cmd->repeat;
+        total_duration_us += (uint64_t)cmd->repeat_gap_us * (cmd->repeat - 1);
+        if (total_duration_us > 30000000ULL)
+        {
+            send_event(EVENT_ERROR, &(event_cmd_ack_t){cmd_id, 1, IOT_ERR_INVALID_ARG, 0}, sizeof(event_cmd_ack_t));
+            break;
+        }
 
         // Empty signal is a valid no-op
         if (cmd->signal_len == 0)
         {
-            send_event(EVENT_CMD_ACK, &(event_cmd_ack_t){cmd_id, 0, 0}, sizeof(event_cmd_ack_t));
+            send_event(EVENT_CMD_ACK, &(event_cmd_ack_t){cmd_id, 0, 0, 0}, sizeof(event_cmd_ack_t));
             break;
         }
 
@@ -531,7 +575,6 @@ void handle_command(msg_frame_t *frame)
             break;
         }
 
-        uint8_t *payload_ptr = (uint8_t *)cmd + sizeof(cmd_gpio_signal_tx_t);
         memcpy(signal_data, payload_ptr, signal_data_size);
 
         gpio_signal_tx_item_t tx_item = {
@@ -541,6 +584,8 @@ void handle_command(msg_frame_t *frame)
             .delay_us = cmd->delay_us,
             .carrier_hz = cmd->carrier_hz,
             .duty_cycle = cmd->duty_cycle,
+            .repeat = cmd->repeat,
+            .repeat_gap_us = cmd->repeat_gap_us,
             .signal_data = signal_data,
             .tx_channel = -1,
             .rx_channel = -1,
@@ -586,6 +631,8 @@ void handle_command(msg_frame_t *frame)
             .delay_us = cmd->delay_us,
             .carrier_hz = cmd->carrier_hz,
             .duty_cycle = cmd->duty_cycle,
+            .repeat = 1,
+            .repeat_gap_us = 0,
             .signal_data = signal_data,
             .tx_channel = -1,
             .rx_channel = -1,

@@ -127,15 +127,27 @@ def test_adc_sample_layout():
 
 def test_signal_tx_layout():
     edges = [(1, 100), (0, 200), (1, 150)]
-    cmd = CmdGpioSignalTx(gpio=5, signal_len=len(edges), delay_us=50, carrier_hz=38000, duty_cycle=0.33, signal_data=edges)
+    cmd = CmdGpioSignalTx(
+        gpio=5,
+        signal_len=len(edges),
+        delay_us=50,
+        carrier_hz=38000,
+        duty_cycle=0.33,
+        repeat=3,
+        repeat_gap_us=10000,
+        signal_data=edges,
+    )
     data = cmd.to_bytes()
-    # header: B gpio + H signal_len + I delay_us + I carrier_hz + f duty_cycle = 15 bytes, then 5 bytes/edge
-    gpio, signal_len, delay_us, carrier_hz, duty_cycle = struct.unpack('<BHIIf', data[:15])
+    # Fixed header is 21 bytes, followed by 5 bytes per edge.
+    gpio, signal_len, delay_us, carrier_hz, duty_cycle, repeat, repeat_gap_us = struct.unpack(
+        '<BHIIfHI', data[:21]
+    )
     assert (gpio, signal_len, delay_us, carrier_hz) == (5, 3, 50, 38000)
     assert duty_cycle == pytest.approx(0.33, rel=1e-6)
-    assert len(data) == 15 + 3 * 5
+    assert (repeat, repeat_gap_us) == (3, 10000)
+    assert len(data) == 21 + 3 * 5
     # verify first edge
-    level, dur = struct.unpack('<BI', data[15:20])
+    level, dur = struct.unpack('<BI', data[21:26])
     assert (level, dur) == (1, 100)
 
 

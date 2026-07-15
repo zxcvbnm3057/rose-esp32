@@ -2,19 +2,24 @@
 from __future__ import annotations
 import asyncio
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import HTTPException
+from fastapi.staticfiles import StaticFiles
 
 from .api.router import api_router
 from .api.custom_cmd import public_router as custom_cmd_public_router
 from .ws.manager import manager
 from .services import bridge_service
 from .db.database import init_db
+from .models.schemas import SignalTxRequest, SignalRxRequest, SignalExchangeRequest
+from .security import is_allowed
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -203,6 +208,25 @@ app.add_middleware(
 )
 
 
+@app.get("/healthz", include_in_schema=False)
+async def healthz():
+    return {"status": "ok"}
+
+
+@app.middleware("http")
+async def source_allowlist(request: Request, call_next):
+    if request.url.path == "/healthz" and request.client and request.client.host in ("127.0.0.1", "::1"):
+        return await call_next(request)
+    allowlist = (
+        "ROSE_API_ALLOWLIST"
+        if request.url.path.startswith(("/api/", "/cmd/"))
+        else "ROSE_CONSOLE_ALLOWLIST"
+    )
+    if not is_allowed(request.client.host if request.client else None, allowlist):
+        return JSONResponse(status_code=403, content={"detail": "Source address is not allowed"})
+    return await call_next(request)
+
+
 # ── Error formatting ──────────────────────────────────────────
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
@@ -224,6 +248,18 @@ app.include_router(api_router)
 # Public custom command URL (no /api/v1 prefix)
 app.include_router(custom_cmd_public_router, prefix="/cmd", tags=["public_cmds"])
 
+# Console static assets. Override the default directory with ROSE_CONSOLE_DIR.
+console_dir = Path(
+    os.environ.get(
+        "ROSE_CONSOLE_DIR",
+        str(Path(__file__).resolve().parents[2] / "console"),
+    )
+)
+if console_dir.is_dir():
+    app.mount("/console", StaticFiles(directory=console_dir, html=True), name="console")
+else:
+    logger.warning("Console static directory does not exist: %s", console_dir)
+
 
 # ── WebSocket ─────────────────────────────────────────────────
 @app.websocket("/ws")
@@ -231,6 +267,10 @@ async def websocket_endpoint(ws: WebSocket):
     role = (ws.query_params.get("role") or "app").strip().lower()
     if role not in ("console", "app"):
         role = "app"
+    allowlist = "ROSE_CONSOLE_ALLOWLIST" if role == "console" else "ROSE_API_ALLOWLIST"
+    if not is_allowed(ws.client.host if ws.client else None, allowlist):
+        await ws.close(code=1008, reason="Source address is not allowed")
+        return
     await manager.connect(ws, role=role)
 
     # Send hardware config + current connection state on connect
@@ -326,29 +366,36 @@ async def _handle_ws_command(ws: WebSocket, msg: dict):
         return {"success": val is not None, "data": {"value": val}}
 
     async def _cmd_signal_tx() -> dict:
+        req = SignalTxRequest.model_validate(msg)
+        signal = [edge.model_dump() for edge in req.signal]
         ok = await bridge_service.signal_tx(
             msg["gpio"],
-            msg.get("signal", []),
-            msg.get("delay_us", 0),
-            msg.get("carrier_hz", 0),
-            msg.get("duty_cycle", 0.5),
+            signal,
+            req.delay_us,
+            req.carrier_hz,
+            req.duty_cycle,
+            req.repeat,
+            req.repeat_gap_us,
         )
         return {
             "success": ok,
             "data": {
                 "gpio": msg.get("gpio"),
-                "edges_sent": len(msg.get("signal", [])),
-                "carrier_hz": msg.get("carrier_hz", 0),
-                "duty_cycle": msg.get("duty_cycle", 0.5),
+                "edges_sent": len(req.signal),
+                "carrier_hz": req.carrier_hz,
+                "duty_cycle": req.duty_cycle,
+                "repeat": req.repeat,
+                "repeat_gap_us": req.repeat_gap_us,
             },
         }
 
     async def _cmd_signal_rx() -> dict:
+        req = SignalRxRequest.model_validate(msg)
         result = await bridge_service.signal_rx(
             msg["gpio"],
-            msg.get("timeout_us", 1_000_000),
-            msg.get("max_edges", 100),
-            msg.get("resolution"),
+            req.timeout_us,
+            req.max_edges,
+            req.resolution,
         )
         return {
             "success": result is not None,
@@ -360,15 +407,17 @@ async def _handle_ws_command(ws: WebSocket, msg: dict):
         }
 
     async def _cmd_signal_exchange() -> dict:
+        req = SignalExchangeRequest.model_validate(msg)
+        tx_signal = [edge.model_dump() for edge in req.tx_signal]
         result = await bridge_service.signal_exchange(
             msg["gpio"],
-            msg.get("tx_signal", []),
-            msg.get("delay_us", 0),
-            msg.get("rx_total_us", 500_000),
-            msg.get("rx_max_edges", 100),
-            msg.get("carrier_hz", 0),
-            msg.get("duty_cycle", 0.5),
-            msg.get("resolution"),
+            tx_signal,
+            req.delay_us,
+            req.rx_total_us,
+            req.rx_max_edges,
+            req.carrier_hz,
+            req.duty_cycle,
+            req.resolution,
         )
         return {
             "success": result is not None,
@@ -409,11 +458,11 @@ async def _handle_ws_command(ws: WebSocket, msg: dict):
     command_registry: dict[str, tuple[str, callable]] = {
         "gpio_get": ("read", _cmd_gpio_get),
         "adc_sample": ("read", _cmd_adc_sample),
-        "signal_tx": ("read", _cmd_signal_tx),
+        "signal_tx": ("control", _cmd_signal_tx),
         "signal_rx": ("read", _cmd_signal_rx),
-        "signal_exchange": ("read", _cmd_signal_exchange),
-        "uart_send": ("read", _cmd_uart_send),
-        "thread_passthrough": ("read", _cmd_thread_passthrough),
+        "signal_exchange": ("control", _cmd_signal_exchange),
+        "uart_send": ("control", _cmd_uart_send),
+        "thread_passthrough": ("control", _cmd_thread_passthrough),
         "gpio_set": ("control", _cmd_gpio_set),
     }
 

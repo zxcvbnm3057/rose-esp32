@@ -246,13 +246,21 @@ class IoTAgentClient:
         delay_us: int = 0,
         carrier_hz: int = 0,
         duty_cycle: float = 0.5,
+        repeat: int = 1,
+        repeat_gap_us: int = 0,
     ) -> bool:
         """Send GPIO signal sequence."""
-        cmd_id = self.commands.gpio_signal_tx(gpio, signal, delay_us, carrier_hz, duty_cycle)
+        cmd_id = self.commands.gpio_signal_tx(
+            gpio, signal, delay_us, carrier_hz, duty_cycle, repeat, repeat_gap_us,
+        )
         if cmd_id is None:
             self.last_error = None
             return False
-        response = self.events.wait_for_response(cmd_id)
+        signal_duration_us = sum(duration_us for _, duration_us in signal)
+        total_duration_s = (
+            signal_duration_us * repeat + repeat_gap_us * max(0, repeat - 1)
+        ) / 1_000_000
+        response = self.events.wait_for_response(cmd_id, timeout=max(5.0, total_duration_s + 2.0))
         return self._check_ack(response)
 
     def receive_signal(self,

@@ -1,0 +1,50 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  validate-hacs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration
+          ignore: brands
+
+  validate-component:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Validate metadata and Python syntax
+        shell: bash
+        run: |
+          python -m json.tool hacs.json >/dev/null
+          python -m json.tool custom_components/rose/manifest.json >/dev/null
+          python -m compileall -q homeassistant/component
+          python -m compileall -q custom_components/rose
+      - name: Verify HACS mirror matches source
+        shell: bash
+        run: diff -ru --exclude=__pycache__ homeassistant/component custom_components/rose
+      - name: Validate release archive layout
+        shell: bash
+        run: |
+          mkdir -p release
+          cp -R custom_components/rose/. release/
+          find release -type d -name __pycache__ -prune -exec rm -rf {} +
+          cd release
+          zip -qr ../rose-home-assistant.zip .
+          cd ..
+          unzip -l rose-home-assistant.zip
+          unzip -p rose-home-assistant.zip manifest.json | python -m json.tool >/dev/null

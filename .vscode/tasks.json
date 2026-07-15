@@ -42,27 +42,6 @@
             },
             "problemMatcher": [],
             "detail": "启动 FastAPI 后端服务 (localhost:8000, 热重载)"
-        },
-        {
-            "label": "🚀 启动业务App后台",
-            "type": "shell",
-            "command": ".\\.conda\\python.exe -m uvicorn app.src.main:app --host 0.0.0.0 --port 9000 --reload --reload-dir app/src/features",
-            "options": {
-                "cwd": "${workspaceFolder}"
-            },
-            "group": {
-                "kind": "build",
-                "isDefault": false
-            },
-            "presentation": {
-                "echo": true,
-                "reveal": "always",
-                "focus": false,
-                "panel": "dedicated",
-                "showReuseMessage": false
-            },
-            "problemMatcher": [],
-            "detail": "启动 Business App 后端服务 (localhost:9000, 热重载)"
         }
     ]
 }

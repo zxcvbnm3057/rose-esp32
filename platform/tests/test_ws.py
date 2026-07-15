@@ -46,12 +46,13 @@ class _RealWSClient:
 
 
 @pytest.fixture
-def ws_client():
+def ws_client(monkeypatch):
     """Mock mode → TestClient(app); real mode → _RealWSClient (websockets to live uvicorn)."""
     if _is_real():
         yield _RealWSClient()
     else:
         from src.main import app
+        monkeypatch.setattr("src.main.is_allowed", lambda address, allowlist: address == "testclient")
         with TestClient(app) as c:
             yield c
 
@@ -99,13 +100,6 @@ def _ws_expect_cmd_result(ws) -> dict:
     raise TimeoutError("No cmd_result received")
 
 
-def _assert_ws_not_rejected_by_permissions(resp: dict) -> None:
-    """WS command may fail at runtime on real hardware, but must not be rejected by role/op policy."""
-    err = str(resp.get("error", "")).lower()
-    assert "not allowed" not in err
-    assert "unsupported ws op" not in err
-
-
 def test_ws_connect_and_receive_config(ws_client, mock_bridge):
     with ws_client.websocket_connect("/ws") as ws:
         msg = ws.receive_json()
@@ -116,7 +110,7 @@ def test_ws_connect_and_receive_config(ws_client, mock_bridge):
 
 
 def test_ws_send_gpio_set(ws_client, mock_bridge):
-    with ws_client.websocket_connect("/ws") as ws:
+    with ws_client.websocket_connect("/ws?role=console") as ws:
         _ws_skip_init(ws)
         ws.send_json({"type": "cmd", "op": "gpio_set", "gpio": 5, "value": 1})
         resp = _ws_expect_cmd_result(ws)
@@ -176,17 +170,19 @@ def test_ws_role_app_can_read(ws_client, mock_bridge):
         assert "success" in resp
 
 
-def test_ws_role_app_can_signal_tx(ws_client, mock_bridge):
+@pytest.mark.parametrize("op,payload", [
+    ("signal_tx", {"gpio": 5, "signal": [{"level": 1, "duration_us": 10}]}),
+    ("signal_exchange", {"gpio": 5, "tx_signal": [{"level": 1, "duration_us": 10}]}),
+    ("uart_send", {"uart_id": 1, "data": "hello"}),
+    ("thread_passthrough", {"device_id": 1, "payload": "AQID"}),
+])
+def test_ws_role_app_cannot_send_or_transmit(ws_client, mock_bridge, op, payload):
     with ws_client.websocket_connect("/ws?role=app") as ws:
         _ws_skip_init(ws)
-        ws.send_json({
-            "type": "cmd", "op": "signal_tx", "gpio": 5,
-            "signal": [{"level": 1, "duration_us": 10}, {"level": 0, "duration_us": 20}],
-            "delay_us": 0,
-        })
+        ws.send_json({"type": "cmd", "op": op, **payload})
         resp = _ws_expect_cmd_result(ws)
-        assert resp["success"] is True
-        assert resp["data"]["edges_sent"] == 2
+        assert resp["success"] is False
+        assert "not allowed" in resp["error"]
 
 
 def test_ws_role_app_can_signal_rx(ws_client, mock_bridge):
@@ -198,51 +194,23 @@ def test_ws_role_app_can_signal_rx(ws_client, mock_bridge):
         assert "edges" in resp["data"]
 
 
-def test_ws_role_app_can_signal_exchange(ws_client, mock_bridge):
-    with ws_client.websocket_connect("/ws?role=app") as ws:
-        _ws_skip_init(ws)
-        ws.send_json({
-            "type": "cmd", "op": "signal_exchange", "gpio": 5,
-            "tx_signal": [{"level": 1, "duration_us": 10}],
-            "delay_us": 0, "rx_total_us": 500000, "rx_max_edges": 100,
-        })
-        resp = _ws_expect_cmd_result(ws)
-        assert resp["success"] is True
-        assert "edges" in resp["data"]
-
-
-def test_ws_role_app_can_uart_send(ws_client, mock_bridge):
-    with ws_client.websocket_connect("/ws?role=app") as ws:
-        _ws_skip_init(ws)
-        # UART0 is the default log output port — always test on UART1.
-        ws.send_json({"type": "cmd", "op": "uart_send", "uart_id": 1, "data": "hello"})
-        resp = _ws_expect_cmd_result(ws)
-        _assert_ws_not_rejected_by_permissions(resp)
-        if not _is_real():
-            assert resp["success"] is True
-        assert resp["data"]["bytes_sent"] == 5
-
-
-def test_ws_role_app_can_thread_passthrough(ws_client, mock_bridge):
-    with ws_client.websocket_connect("/ws?role=app") as ws:
-        _ws_skip_init(ws)
-        ws.send_json({
-            "type": "cmd", "op": "thread_passthrough",
-            "device_id": 1, "correlation_id": 0, "payload": "AQID",
-        })
-        resp = _ws_expect_cmd_result(ws)
-        _assert_ws_not_rejected_by_permissions(resp)
-        if not _is_real():
-            assert resp["success"] is True
-        assert resp["data"]["device_id"] == 1
-
-
 def test_ws_role_console_can_control(ws_client, mock_bridge):
     with ws_client.websocket_connect("/ws?role=console") as ws:
         _ws_skip_init(ws)
         ws.send_json({"type": "cmd", "op": "gpio_set", "gpio": 5, "value": 1})
         resp = _ws_expect_cmd_result(ws)
         assert "success" in resp
+
+
+def test_ws_role_console_signal_tx_validates_duration(ws_client, mock_bridge):
+    with ws_client.websocket_connect("/ws?role=console") as ws:
+        _ws_skip_init(ws)
+        ws.send_json({
+            "type": "cmd", "op": "signal_tx", "gpio": 5,
+            "signal": [{"level": 1, "duration_us": 32768}],
+        })
+        resp = _ws_expect_cmd_result(ws)
+        assert resp["success"] is False
 
 
 def test_ws_unregistered_command_rejected_even_for_console(ws_client, mock_bridge):

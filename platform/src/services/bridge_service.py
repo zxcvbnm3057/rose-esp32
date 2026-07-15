@@ -210,9 +210,14 @@ async def signal_tx(
     delay_us: int = 0,
     carrier_hz: int = 0,
     duty_cycle: float = 0.5,
+    repeat: int = 1,
+    repeat_gap_us: int = 0,
 ) -> bool:
     tx = [(s["level"], s["duration_us"]) for s in signal]
-    return await _run_sync(get_client().send_signal, gpio, tx, delay_us, carrier_hz, duty_cycle)
+    return await _run_sync(
+        get_client().send_signal,
+        gpio, tx, delay_us, carrier_hz, duty_cycle, repeat, repeat_gap_us,
+    )
 
 
 async def signal_rx(gpio: int, timeout_us: int, max_edges: int,

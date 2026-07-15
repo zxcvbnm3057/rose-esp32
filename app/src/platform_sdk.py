@@ -104,6 +104,8 @@ class PlatformClient:
         delay_us: int = 0,
         carrier_hz: int = 0,
         duty_cycle: float = 0.5,
+        repeat: int = 1,
+        repeat_gap_us: int = 0,
     ) -> dict[str, Any]:
         logger.debug("Transmitting signal on GPIO%d: %d edges, delay %dus, carrier %dHz duty %.2f",
                      gpio, len(signal), delay_us, carrier_hz, duty_cycle)
@@ -115,6 +117,8 @@ class PlatformClient:
                 "delay_us": delay_us,
                 "carrier_hz": carrier_hz,
                 "duty_cycle": duty_cycle,
+                "repeat": repeat,
+                "repeat_gap_us": repeat_gap_us,
             },
         )
 

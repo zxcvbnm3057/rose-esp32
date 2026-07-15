@@ -89,6 +89,8 @@ async def _execute_step(step_type: str, config: dict, ctx: dict) -> Any:
             config.get("delay_us", 0),
             config.get("carrier_hz", 0),
             config.get("duty_cycle", 0.5),
+            config.get("repeat", 1),
+            config.get("repeat_gap_us", 0),
         )
         return {"ack": ok}
 

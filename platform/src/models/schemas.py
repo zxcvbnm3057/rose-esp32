@@ -2,6 +2,7 @@
 from __future__ import annotations
 from typing import Any, Optional
 from pydantic import BaseModel, Field
+from pydantic import model_validator
 
 
 # ── Generic response ──────────────────────────────────────────
@@ -29,7 +30,7 @@ class AdcSampleRequest(BaseModel):
 
 class SignalEdge(BaseModel):
     level: int = Field(..., ge=0, le=1)
-    duration_us: int = Field(..., ge=1, le=1_000_000)
+    duration_us: int = Field(..., ge=1, le=32_767)
 
 
 class SignalTxRequest(BaseModel):
@@ -37,6 +38,16 @@ class SignalTxRequest(BaseModel):
     delay_us: int = Field(default=0, ge=0)
     carrier_hz: int = Field(default=0, ge=0, le=500_000)
     duty_cycle: float = Field(default=0.5, gt=0.0, le=1.0)
+    repeat: int = Field(default=1, ge=1, le=100)
+    repeat_gap_us: int = Field(default=0, ge=0, le=100_000)
+
+    @model_validator(mode="after")
+    def validate_total_duration(self):
+        total_us = sum(edge.duration_us for edge in self.signal) * self.repeat
+        total_us += self.repeat_gap_us * max(0, self.repeat - 1)
+        if total_us > 30_000_000:
+            raise ValueError("total signal duration must not exceed 30 seconds")
+        return self
 
 
 class SignalRxRequest(BaseModel):

@@ -2,6 +2,17 @@
 import base64
 import pytest
 
+from src.security import networks_for
+
+
+@pytest.mark.anyio
+async def test_healthz_ignores_api_allowlist_for_loopback(client, monkeypatch):
+    monkeypatch.setenv("ROSE_API_ALLOWLIST", "192.168.137.200/32")
+    networks_for.cache_clear()
+    res = await client.get("/healthz")
+    assert res.status_code == 200
+    assert res.json() == {"status": "ok"}
+
 
 @pytest.mark.anyio
 async def test_device_status(client, mock_bridge):

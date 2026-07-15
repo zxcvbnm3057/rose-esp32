@@ -75,9 +75,14 @@ class CommandDispatcher:
         delay_us: int = 0,
         carrier_hz: int = 0,
         duty_cycle: float = 0.5,
+        repeat: int = 1,
+        repeat_gap_us: int = 0,
     ) -> Optional[int]:
         """Send GPIO signal sequence."""
-        cmd = CmdGpioSignalTx(gpio, len(signal_data), delay_us, carrier_hz, duty_cycle, signal_data)
+        cmd = CmdGpioSignalTx(
+            gpio, len(signal_data), delay_us, carrier_hz, duty_cycle,
+            repeat, repeat_gap_us, signal_data,
+        )
         return self._send_command(CMD_GPIO_SIGNAL_TX, cmd.to_bytes())
 
     def gpio_signal_rx(self, gpio: int, timeout_us: int = 1000000, max_edges: int = 100) -> Optional[int]:

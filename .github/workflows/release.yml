@@ -1,0 +1,62 @@
+name: Release Home Assistant integration
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v-prefixed tag to package
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Resolve and validate version
+        id: version
+        shell: bash
+        env:
+          REQUESTED_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          TAG="$REQUESTED_TAG"
+          case "$TAG" in v*) ;; *) echo "Tag must start with v" >&2; exit 1 ;; esac
+          VERSION="${TAG#v}"
+          MANIFEST_VERSION="$(python -c 'import json; print(json.load(open("custom_components/rose/manifest.json"))["version"])')"
+          test "$VERSION" = "$MANIFEST_VERSION" || {
+            echo "Tag version $VERSION does not match manifest version $MANIFEST_VERSION" >&2
+            exit 1
+          }
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Build HACS archive
+        shell: bash
+        run: |
+          diff -ru --exclude=__pycache__ homeassistant/component custom_components/rose
+          mkdir -p release
+          cp -R custom_components/rose/. release/
+          find release -type d -name __pycache__ -prune -exec rm -rf {} +
+          cd release
+          zip -qr ../rose-home-assistant.zip .
+
+      - name: Verify archive
+        shell: bash
+        run: |
+          unzip -t rose-home-assistant.zip
+          unzip -p rose-home-assistant.zip manifest.json | python -m json.tool >/dev/null
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+          files: rose-home-assistant.zip

@@ -135,6 +135,8 @@ typedef struct
     uint32_t delay_us;
     uint32_t carrier_hz;
     float duty_cycle;
+    uint16_t repeat;
+    uint32_t repeat_gap_us;
 } cmd_gpio_signal_tx_t;
 
 typedef struct
@@ -516,6 +518,8 @@ typedef struct
     uint32_t delay_us;
     uint32_t carrier_hz;
     float duty_cycle;
+    uint16_t repeat;
+    uint32_t repeat_gap_us;
     uint8_t *signal_data;
     int8_t tx_channel;
     int8_t rx_channel;

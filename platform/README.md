@@ -79,7 +79,10 @@ cd platform
 |----|----------|----------|------|
 | `gpio_get` | `read` | `app`, `console` | 读取 GPIO 输入值 |
 | `adc_sample` | `read` | `app`, `console` | 读取 ADC 采样值 |
+| `signal_rx` | `read` | `app`, `console` | 采集微秒级波形 |
 | `gpio_set` | `control` | `console` | 设置 GPIO 输出值 |
+| `signal_tx` / `signal_exchange` | `control` | `console` | 输出波形或发送并采集 |
+| `uart_send` / `thread_passthrough` | `control` | `console` | 发送 UART 或 Thread 数据 |
 
 像 `gpio_config`、BLE 配对开关、UART 配置、端口绑定等敏感/改配类能力，当前**不通过 WS 暴露**；如未来需要开放，必须先在平台层显式登记权限。
 

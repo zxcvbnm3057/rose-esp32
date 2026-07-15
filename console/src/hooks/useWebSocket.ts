@@ -10,7 +10,8 @@ export function useWebSocket() {
 
     const connect = useCallback(() => {
         if (!mountedRef.current) return;
-        const ws = new WebSocket('ws://127.0.0.1:8000/ws?role=console');
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws?role=console`);
         wsRef.current = ws;
 
         ws.onopen = () => {

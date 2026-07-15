@@ -194,10 +194,21 @@ class CmdGpioSignalTx:
     delay_us: int
     carrier_hz: int
     duty_cycle: float
+    repeat: int
+    repeat_gap_us: int
     signal_data: List[Tuple[int, int]]  # List of (level, duration_us)
 
     def to_bytes(self) -> bytes:
-        data = struct.pack('<BHIIf', self.gpio, self.signal_len, self.delay_us, self.carrier_hz, self.duty_cycle)
+        data = struct.pack(
+            '<BHIIfHI',
+            self.gpio,
+            self.signal_len,
+            self.delay_us,
+            self.carrier_hz,
+            self.duty_cycle,
+            self.repeat,
+            self.repeat_gap_us,
+        )
         for level, duration in self.signal_data:
             data += struct.pack('<BI', level, duration)
         return data

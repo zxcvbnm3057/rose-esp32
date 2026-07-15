@@ -19,9 +19,70 @@ async def test_signal_tx(client, mock_bridge, is_real):
         "delay_us": 0,
         "carrier_hz": 38000,
         "duty_cycle": 0.33,
+        "repeat": 3,
+        "repeat_gap_us": 10000,
     })
     assert res.status_code == 200
     assert res.json()["success"] is True
+    assert res.json()["data"]["repeat"] == 3
+    assert res.json()["data"]["repeat_gap_us"] == 10000
+
+
+@pytest.mark.anyio
+async def test_signal_tx_repeat_passthrough(is_real):
+    if is_real:
+        pytest.skip("纯透传逻辑，mock 专用")
+    from unittest.mock import MagicMock, patch
+    from src.services import bridge_service
+
+    fake_client = MagicMock()
+    fake_client.send_signal.return_value = True
+    with patch.object(bridge_service, "get_client", return_value=fake_client):
+        await bridge_service.signal_tx(
+            gpio=5,
+            signal=[{"level": 1, "duration_us": 100}],
+            carrier_hz=38000,
+            duty_cycle=0.33,
+            repeat=4,
+            repeat_gap_us=12000,
+        )
+    assert fake_client.send_signal.call_args.args[-2:] == (4, 12000)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("repeat", [0, 101])
+async def test_signal_tx_invalid_repeat(client, mock_bridge, repeat):
+    res = await client.post("/api/v1/gpio/5/signal/tx", json={
+        "signal": [{"level": 1, "duration_us": 100}],
+        "repeat": repeat,
+    })
+    assert res.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_signal_tx_repeat_gap_too_large(client, mock_bridge):
+    res = await client.post("/api/v1/gpio/5/signal/tx", json={
+        "signal": [{"level": 1, "duration_us": 100}],
+        "repeat_gap_us": 100001,
+    })
+    assert res.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_signal_tx_duration_exceeds_rmt_limit(client, mock_bridge):
+    res = await client.post("/api/v1/gpio/5/signal/tx", json={
+        "signal": [{"level": 1, "duration_us": 32768}],
+    })
+    assert res.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_signal_tx_total_duration_exceeds_budget(client, mock_bridge):
+    res = await client.post("/api/v1/gpio/5/signal/tx", json={
+        "signal": [{"level": 1, "duration_us": 32767}] * 10,
+        "repeat": 100,
+    })
+    assert res.status_code == 422
 
 
 @pytest.mark.anyio
