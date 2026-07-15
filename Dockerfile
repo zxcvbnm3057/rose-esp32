@@ -18,6 +18,7 @@ COPY requirements.docker.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY platform ./platform
+COPY bridge/src ./bridge/src
 COPY hardware_config.json ./hardware_config.json
 COPY --from=console-build /build/console/dist ./console
 

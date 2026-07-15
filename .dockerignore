@@ -11,7 +11,6 @@ platform/.pytest_cache
 platform/rose_iot.db
 rose_iot.db
 homeassistant
-bridge
 src
 include
 third_party
