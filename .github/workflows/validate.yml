@@ -32,13 +32,13 @@ jobs:
         shell: bash
         run: |
           python -m json.tool hacs.json >/dev/null
-          python -m json.tool homeassistant/component/manifest.json >/dev/null
-          python -m compileall -q homeassistant/component
+          python -m json.tool custom_components/rose/manifest.json >/dev/null
+          python -m compileall -q custom_components/rose
       - name: Validate release archive layout
         shell: bash
         run: |
           mkdir -p release
-          cp -R homeassistant/component/. release/
+          cp -R custom_components/rose/. release/
           find release -type d -name __pycache__ -prune -exec rm -rf {} +
           cd release
           zip -qr ../rose-home-assistant.zip .

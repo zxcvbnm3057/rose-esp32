@@ -70,7 +70,7 @@ http://127.0.0.1:8000/console/
 
 ### 手动安装
 
-集成的唯一源码位于仓库的 `homeassistant/component`。手动安装时，在 HA 中创建以下目录，并将 `homeassistant/component` 的内容放入其中：
+集成的唯一源码位于仓库的 `custom_components/rose`。手动安装时，将该目录放到 HA 的以下位置：
 
 ```text
 /config/custom_components/rose
