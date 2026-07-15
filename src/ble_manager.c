@@ -4,6 +4,7 @@
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
+#include "host/ble_store.h"
 #include "host/util/util.h"
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
@@ -12,6 +13,9 @@
 #include "esp_timer.h"
 
 static const char *TAG = "ble_manager";
+
+static void ble_app_advertise(void);
+static void ble_start_scan(void);
 
 /* ================================================================
  *  In-range device table — unified presence model
@@ -31,6 +35,7 @@ static const char *TAG = "ble_manager";
 // IN_RANGE_MAX is defined in iot_agent.h (shared with command_dispatcher).
 #define IN_RANGE_TIMEOUT_S 10 // no heartbeat/adv within this window → out of range
 #define CONN_HANDLE_NONE 0xFFFF
+#define BLE_BOND_CAPACITY 5
 
 static ble_in_range_device_t in_range_devices[IN_RANGE_MAX];
 
@@ -147,6 +152,100 @@ uint8_t ble_pairing_pin[6] = {0};
 uint8_t ble_rssi_scan_enabled = 0;
 uint32_t ble_rssi_interval_s = 5;
 uint32_t ble_rssi_last_scan_time = 0;
+static volatile uint8_t ble_pairing_disable_pending = 0;
+static volatile TickType_t ble_pairing_disable_at_tick = 0;
+static uint8_t ble_gap_restart_suppressed = 0;
+static uint16_t ble_pairing_conn_handle = CONN_HANDLE_NONE;
+
+static void ble_schedule_pairing_disable(void)
+{
+    ble_pairing_disable_at_tick =
+        xTaskGetTickCount() + pdMS_TO_TICKS(1000);
+    ble_pairing_disable_pending = 1;
+}
+
+typedef struct
+{
+    bool found;
+    ble_addr_t peer_addr;
+    uint16_t bond_count;
+} ble_lru_candidate_t;
+
+static int ble_lru_find_cb(int obj_type, union ble_store_value *value,
+                           void *cookie)
+{
+    ble_lru_candidate_t *candidate = cookie;
+    const struct ble_store_value_sec *sec = &value->sec;
+
+    if (obj_type != BLE_STORE_OBJ_TYPE_OUR_SEC)
+        return 0;
+    if (!candidate->found || sec->bond_count < candidate->bond_count)
+    {
+        candidate->found = true;
+        candidate->peer_addr = sec->peer_addr;
+        candidate->bond_count = sec->bond_count;
+    }
+    return 0;
+}
+
+// Rewriting OUR_SEC updates NimBLE's native bond_count in the existing bond
+// record. PEER_SEC is intentionally untouched to avoid re-adding its IRK.
+static void ble_lru_touch(const ble_addr_t *peer_addr)
+{
+    struct ble_store_key_sec key = {0};
+    struct ble_store_value_sec value;
+    key.peer_addr = *peer_addr;
+
+    int rc = ble_store_read_our_sec(&key, &value);
+    if (rc == 0)
+    {
+        rc = ble_store_write_our_sec(&value);
+        if (rc != 0)
+            ESP_LOGW(TAG, "Failed to update bond LRU; rc=%d", rc);
+    }
+}
+
+static int ble_unpair_with_gap_paused(const ble_addr_t *peer_addr)
+{
+    ble_gap_restart_suppressed = 1;
+    if (ble_gap_adv_active())
+        ble_gap_adv_stop();
+    if (ble_gap_disc_active())
+        ble_gap_disc_cancel();
+
+    int rc = ble_gap_unpair(peer_addr);
+    ble_gap_restart_suppressed = 0;
+    ble_app_advertise();
+    ble_start_scan();
+    return rc;
+}
+
+static int ble_lru_evict_if_full(void)
+{
+    ble_addr_t peers[BLE_BOND_CAPACITY];
+    int peer_count = 0;
+    int rc = ble_store_util_bonded_peers(peers, &peer_count,
+                                         BLE_BOND_CAPACITY);
+    if (rc != 0 || peer_count < BLE_BOND_CAPACITY)
+        return rc;
+
+    ble_lru_candidate_t candidate = {0};
+    rc = ble_store_iterate(BLE_STORE_OBJ_TYPE_OUR_SEC,
+                           ble_lru_find_cb, &candidate);
+    if (rc != 0 || !candidate.found)
+        return rc != 0 ? rc : BLE_HS_ENOENT;
+
+    rc = ble_unpair_with_gap_paused(&candidate.peer_addr);
+    if (rc != 0)
+        return rc;
+
+    ESP_LOGI(TAG, "Evicted LRU bond %02x:%02x:%02x:%02x:%02x:%02x count=%u",
+             candidate.peer_addr.val[0], candidate.peer_addr.val[1],
+             candidate.peer_addr.val[2], candidate.peer_addr.val[3],
+             candidate.peer_addr.val[4], candidate.peer_addr.val[5],
+             candidate.bond_count);
+    return 0;
+}
 
 /* ================================================================
  *  HID Report Map — Media / Consumer Control (no input provided)
@@ -219,12 +318,10 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg);
 // NimBLE store init — available at link time even if not in headers
 extern void ble_store_config_init(void);
 
-static void ble_app_advertise(void);
 static void ble_host_task(void *pvParameters);
 static void ble_on_sync(void);
 static void ble_on_reset(int reason);
 static void ble_restart_advertising(void);
-static void ble_start_scan(void);
 static int ble_scan_event(struct ble_gap_event *event, void *arg);
 
 /* ================================================================
@@ -383,6 +480,9 @@ static void ble_restart_advertising(void)
  * ================================================================ */
 static void ble_start_scan(void)
 {
+    if (ble_gap_restart_suppressed || ble_gap_disc_active())
+        return;
+
     struct ble_gap_disc_params scan_params = {0};
     scan_params.itvl = 0x0100;     // 160 ms
     scan_params.window = 0x0050;   // 50 ms — leave airtime for adv/conn
@@ -425,7 +525,8 @@ static int ble_scan_event(struct ble_gap_event *event, void *arg)
     case BLE_GAP_EVENT_DISC_COMPLETE:
         // Scan cycle finished — restart to keep observing continuously.
         ESP_LOGD(TAG, "Scan complete (reason=%d), restarting", event->disc_complete.reason);
-        ble_start_scan();
+        if (!ble_gap_restart_suppressed)
+            ble_start_scan();
         return 0;
 
     default:
@@ -455,30 +556,26 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
             return 0;
         }
 
-        // Accept connection
+        // Existing bonds restore encryption; unbonded peers reach the
+        // passkey callback and are rejected while pairing is disabled.
         {
-            if (ble_pairing_enabled)
+            rc = ble_gap_security_initiate(event->connect.conn_handle);
+            if (rc == 0)
             {
-                rc = ble_gap_security_initiate(event->connect.conn_handle);
-                if (rc == 0)
-                {
-                    ESP_LOGI(TAG, "Security initiated, waiting for passkey...");
-                }
-                else if (rc == BLE_HS_EALREADY)
-                {
-                    // Central (e.g. a PC) already started pairing/encryption.
-                    // This is the normal path for a central-initiated bond —
-                    // let it drive the SMP ceremony instead of rejecting.
-                    ESP_LOGI(TAG, "Security already in progress (central-initiated) — continuing");
-                }
-                else
-                {
-                    ESP_LOGE(TAG, "security_initiate rc=%d — rejecting", rc);
-                    ble_gap_terminate(event->connect.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
-                }
+                ESP_LOGI(TAG, "Security initiated (%s)",
+                         ble_pairing_enabled ? "pair or restore bond"
+                                             : "restore existing bond");
+            }
+            else if (rc == BLE_HS_EALREADY)
+            {
+                ESP_LOGI(TAG, "Security already in progress");
             }
             else
-                ESP_LOGI(TAG, "Pairing disabled — accepting without new pairing");
+            {
+                ESP_LOGE(TAG, "security_initiate rc=%d — rejecting", rc);
+                ble_gap_terminate(event->connect.conn_handle,
+                                  BLE_ERR_REM_USER_CONN_TERM);
+            }
 
             ble_app_advertise();
         }
@@ -495,6 +592,8 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
             // IN_RANGE_TIMEOUT_S window in ble_rssi_task. If the device is
             // truly gone, it stops advertising and times out there.
             uint16_t handle = event->disconnect.conn.conn_handle;
+            if (ble_pairing_conn_handle == handle)
+                ble_pairing_conn_handle = CONN_HANDLE_NONE;
             ble_in_range_device_t *d = device_find_by_handle(handle);
             if (d)
                 d->conn_handle = CONN_HANDLE_NONE;
@@ -521,15 +620,14 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
                 ble_in_range_device_t *d =
                     device_get_or_add(enc_desc.peer_id_addr.val);
                 device_mark_active(d, rssi, handle, now);
+                ble_lru_touch(&enc_desc.peer_id_addr);
             }
-            ESP_LOGI(TAG, "Device bonded (encryption OK)");
-            if (ble_pairing_enabled)
+            ESP_LOGI(TAG, "Link encryption enabled");
+            if (ble_pairing_enabled && ble_pairing_conn_handle == handle)
             {
-                // Pairing finished: auto-disable pin. ble_disable_pairing()
-                // clears the flag, emits PAIRING_DISABLED, and re-advertises
-                // as non-discoverable so no new devices can find/pair.
-                ESP_LOGI(TAG, "Auto-disabling pairing after successful bond");
-                ble_disable_pairing();
+                ESP_LOGI(TAG, "Passkey pairing encrypted; scheduling pairing disable");
+                ble_pairing_conn_handle = CONN_HANDLE_NONE;
+                ble_schedule_pairing_disable();
             }
         }
         else
@@ -549,6 +647,15 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
         }
         if (event->passkey.params.action == BLE_SM_IOACT_DISP)
         {
+            ble_pairing_conn_handle = event->passkey.conn_handle;
+            rc = ble_lru_evict_if_full();
+            if (rc != 0)
+            {
+                ESP_LOGE(TAG, "Cannot make room for new bond; rc=%d", rc);
+                ble_gap_terminate(event->passkey.conn_handle,
+                                  BLE_ERR_REM_USER_CONN_TERM);
+                return 0;
+            }
             struct ble_sm_io pkey = {0};
             pkey.action = BLE_SM_IOACT_DISP;
             uint32_t pin = 0;
@@ -558,15 +665,46 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
             ESP_LOGI(TAG, "Injecting passkey %06lu", (unsigned long)pin);
             rc = ble_sm_inject_io(event->passkey.conn_handle, &pkey);
             ESP_LOGI(TAG, "ble_sm_inject_io rc=%d", rc);
+            if (rc != 0)
+                ble_gap_terminate(event->passkey.conn_handle,
+                                  BLE_ERR_REM_USER_CONN_TERM);
+        }
+        else
+        {
+            ESP_LOGW(TAG, "Unsupported passkey action=%d — rejecting",
+                     event->passkey.params.action);
+            ble_gap_terminate(event->passkey.conn_handle,
+                              BLE_ERR_REM_USER_CONN_TERM);
+        }
+        return 0;
+
+    case BLE_GAP_EVENT_PARING_COMPLETE:
+        ESP_LOGI(TAG, "PAIRING_COMPLETE status=%d conn=%d",
+                 event->pairing_complete.status,
+                 event->pairing_complete.conn_handle);
+        if (event->pairing_complete.status == 0 && ble_pairing_enabled)
+        {
+            ble_pairing_conn_handle = CONN_HANDLE_NONE;
+            ble_schedule_pairing_disable();
         }
         return 0;
 
     case BLE_GAP_EVENT_REPEAT_PAIRING:
-        ESP_LOGI(TAG, "REPEAT_PAIRING — deleting old bond, retrying");
+        if (!ble_pairing_enabled)
+        {
+            ESP_LOGW(TAG, "REPEAT_PAIRING rejected; preserving existing bond");
+            ble_gap_terminate(event->repeat_pairing.conn_handle,
+                              BLE_ERR_REM_USER_CONN_TERM);
+            return BLE_GAP_REPEAT_PAIRING_IGNORE;
+        }
+        ESP_LOGI(TAG, "REPEAT_PAIRING allowed — replacing old bond");
         rc = ble_gap_conn_find(event->repeat_pairing.conn_handle, &desc);
-        if (rc == 0)
-            ble_store_util_delete_peer(&desc.peer_id_addr);
-        return BLE_GAP_REPEAT_PAIRING_RETRY;
+        if (rc != 0)
+            return BLE_GAP_REPEAT_PAIRING_IGNORE;
+        rc = ble_unpair_with_gap_paused(&desc.peer_id_addr);
+        if (rc != 0)
+            ESP_LOGE(TAG, "Repeat-pairing unpair failed; rc=%d", rc);
+        return BLE_GAP_REPEAT_PAIRING_IGNORE;
 
     case BLE_GAP_EVENT_CONN_UPDATE:
         ESP_LOGI(TAG, "CONN_UPDATE status=%d", event->conn_update.status);
@@ -578,7 +716,8 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
 
     case BLE_GAP_EVENT_ADV_COMPLETE:
         ESP_LOGI(TAG, "ADV_COMPLETE reason=%d", event->adv_complete.reason);
-        ble_app_advertise();
+        if (!ble_gap_restart_suppressed)
+            ble_app_advertise();
         return 0;
 
     case BLE_GAP_EVENT_MTU:
@@ -595,6 +734,8 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg)
  * ================================================================ */
 void ble_enable_pairing(uint16_t cmd_id, uint32_t timeout_s)
 {
+    ble_pairing_disable_pending = 0;
+    ble_pairing_conn_handle = CONN_HANDLE_NONE;
     ble_pairing_enabled = 1;
     ble_pairing_timeout_s = timeout_s;
     ble_pairing_start_time = (uint32_t)(esp_timer_get_time() / 1000000);
@@ -612,6 +753,8 @@ void ble_enable_pairing(uint16_t cmd_id, uint32_t timeout_s)
 
 void ble_disable_pairing(void)
 {
+    ble_pairing_disable_pending = 0;
+    ble_pairing_conn_handle = CONN_HANDLE_NONE;
     uint8_t reason = ble_pairing_enabled ? 2 : 0;
     ble_pairing_enabled = 0;
     ble_pairing_timeout_s = 0;
@@ -713,6 +856,12 @@ void ble_rssi_task(void *pvParameters)
     {
         vTaskDelay(delay);
         uint32_t now = (uint32_t)(esp_timer_get_time() / 1000000);
+        if (ble_pairing_disable_pending &&
+            (int32_t)(xTaskGetTickCount() - ble_pairing_disable_at_tick) >= 0)
+        {
+            ESP_LOGI(TAG, "Bond persistence grace period complete");
+            ble_disable_pairing();
+        }
         if (ble_pairing_enabled && ble_pairing_timeout_s > 0)
         {
             uint32_t elapsed = now - ble_pairing_start_time;
