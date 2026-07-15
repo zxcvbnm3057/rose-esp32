@@ -8,6 +8,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.device_registry import DeviceEntry
 
 from .client import RoseApiError, RoseClient
 from .const import CONF_PLATFORM_URL, DOMAIN, PLATFORMS
@@ -80,3 +81,34 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not hass.data[DOMAIN]:
             hass.services.async_remove(DOMAIN, "send_tcl")
     return unloaded
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: ConfigEntry, device_entry: DeviceEntry
+) -> bool:
+    managed_identifiers = {(DOMAIN, "platform")}
+    managed_identifiers.update(
+        (DOMAIN, f"climate_{key}")
+        for key in entry.options.get("climates", {})
+    )
+    managed_identifiers.update(
+        (DOMAIN, f"light_{key}")
+        for key in entry.options.get("lights", {})
+    )
+    runtime = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    coordinator = runtime.get("coordinator")
+    ble_devices = (coordinator.data or {}).get("ble", {}) if coordinator else {}
+    managed_identifiers.update((DOMAIN, f"ble_{mac}") for mac in ble_devices)
+    rose_identifiers = {
+        identifier
+        for domain, identifier in device_entry.identifiers
+        if domain == DOMAIN
+    }
+    return (
+        bool(rose_identifiers)
+        and device_entry.identifiers.isdisjoint(managed_identifiers)
+        and all(
+            identifier.startswith(("climate_", "light_", "ble_"))
+            for identifier in rose_identifiers
+        )
+    )

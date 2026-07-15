@@ -62,11 +62,12 @@ http://127.0.0.1:8000/console/
 
 ### HACS 自定义仓库
 
-1. 将当前改动推送到公开仓库 `https://github.com/zxcvbnm3057/rose-esp32`。
-2. 推送与 manifest 版本一致的 tag，例如 `v0.1.0`；GitHub Actions 会自动创建 Release，并附加 `rose-home-assistant.zip`。
-3. HACS -> Integrations -> Custom repositories。
-4. 添加仓库 URL，类型选择 `Integration`。
-5. 安装 `Rose` 并重启 Home Assistant。
+1. 将源码推送到公开仓库 `https://github.com/zxcvbnm3057/rose-esp32` 的默认分支。
+2. HACS -> Integrations -> Custom repositories。
+3. 添加仓库 URL，类型选择 `Integration`。
+4. 安装 `Rose` 并重启 Home Assistant。
+
+HACS 会直接安装默认分支中 `custom_components/rose` 的源码，不需要 tag、GitHub Release、ZIP 安装包或 GitHub Actions。
 
 ### 手动安装
 

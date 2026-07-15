@@ -6,7 +6,7 @@ CONF_CLIMATES = "climates"
 CONF_LIGHTS = "lights"
 DEFAULT_NAME = "Rose Platform"
 EVENT_BLE_PRESENCE = "rose_ble_presence"
-PLATFORMS = ["binary_sensor", "climate", "device_tracker", "light"]
+PLATFORMS = ["binary_sensor", "climate", "device_tracker", "light", "number", "switch"]
 
 
 def configured_devices(entry, key: str) -> dict:

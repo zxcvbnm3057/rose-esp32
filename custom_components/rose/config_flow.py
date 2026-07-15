@@ -90,6 +90,41 @@ class RoseOptionsFlow(config_entries.OptionsFlow):
             self._options = deepcopy(dict(self.config_entry.options))
         return self._options
 
+    def _hardware(self) -> dict:
+        runtime = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id, {})
+        hardware = runtime.get("hardware", {})
+        return hardware if isinstance(hardware, dict) else {}
+
+    @staticmethod
+    def _choices(values, current, label) -> dict[int, str]:
+        choices = {int(value): label(int(value)) for value in values}
+        if current is not None:
+            current_value = int(current)
+            choices.setdefault(current_value, label(current_value))
+        return choices
+
+    def _signal_gpio_choices(self, current=None) -> dict[int, str]:
+        pins = self._hardware().get("pins", [])
+        gpios = [
+            pin["gpio"]
+            for pin in pins
+            if isinstance(pin, dict)
+            and isinstance(pin.get("gpio"), int)
+            and pin["gpio"] >= 0
+            and not pin.get("reserved", False)
+            and isinstance(pin.get("capabilities"), dict)
+            and pin["capabilities"].get("signal", False)
+        ]
+        if not gpios:
+            gpios = list(range(31))
+        return self._choices(gpios, current, lambda gpio: f"GPIO {gpio}")
+
+    def _uart_choices(self, current=None) -> dict[int, str]:
+        capabilities = self._hardware().get("capabilities", {})
+        uart_count = capabilities.get("uart_count", 0) if isinstance(capabilities, dict) else 0
+        uart_ids = range(max(0, int(uart_count))) if uart_count else range(3)
+        return self._choices(uart_ids, current, lambda uart_id: f"UART {uart_id}")
+
     async def async_step_init(self, user_input=None):
         self._ensure_options()
         return self.async_show_menu(
@@ -144,17 +179,19 @@ class RoseOptionsFlow(config_entries.OptionsFlow):
         schema = {}
         if existing_key is None:
             schema[vol.Required(CONF_KEY, default="")] = str
+        current_gpio = current.get("gpio", 4)
+        current_repeat = current.get("repeat", 1)
         schema.update(
             {
                 vol.Required(CONF_NAME, default=current.get(CONF_NAME, "")): cv.string,
-                vol.Required("gpio", default=current.get("gpio", 4)): vol.All(
-                    vol.Coerce(int), vol.Range(min=0, max=30)
+                vol.Required("gpio", default=current_gpio): vol.In(
+                    self._signal_gpio_choices(current_gpio)
                 ),
                 vol.Required("temperature", default=current.get("temperature", 26)): vol.All(
                     vol.Coerce(float), vol.Range(min=16, max=31)
                 ),
-                vol.Required("repeat", default=current.get("repeat", 1)): vol.All(
-                    vol.Coerce(int), vol.Range(min=1, max=100)
+                vol.Required("repeat", default=current_repeat): vol.In(
+                    self._choices(range(1, 101), current_repeat, str)
                 ),
                 vol.Required("repeat_gap_us", default=current.get("repeat_gap_us", 0)): vol.All(
                     vol.Coerce(int), vol.Range(min=0, max=100000)
@@ -189,11 +226,12 @@ class RoseOptionsFlow(config_entries.OptionsFlow):
         schema = {}
         if existing_key is None:
             schema[vol.Required(CONF_KEY, default="")] = str
+        current_uart_id = current.get("uart_id", 1)
         schema.update(
             {
                 vol.Required(CONF_NAME, default=current.get(CONF_NAME, "")): cv.string,
-                vol.Required("uart_id", default=current.get("uart_id", 1)): vol.All(
-                    vol.Coerce(int), vol.Range(min=0)
+                vol.Required("uart_id", default=current_uart_id): vol.In(
+                    self._uart_choices(current_uart_id)
                 ),
                 vol.Required("on", default=current.get("on", "")): cv.string,
                 vol.Required("off", default=current.get("off", "")): cv.string,

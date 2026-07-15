@@ -1,7 +1,5 @@
 {
     "name": "Rose",
-    "zip_release": true,
-    "filename": "rose-home-assistant.zip",
     "homeassistant": "2025.1.0",
     "render_readme": true
 }
