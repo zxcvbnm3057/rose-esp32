@@ -244,3 +244,34 @@ async def test_ble_device_name_delete_nonexistent(client):
     assert res.status_code == 200
     assert res.json()["data"]["deleted"] is True
 
+
+@pytest.mark.anyio
+async def test_discovered_ble_devices_are_remembered(client):
+    from src.main import _remember_ble_devices
+
+    await _remember_ble_devices({
+        "type": "ble_in_range_list",
+        "devices": [
+            {"mac": "AA-BB-CC-DD-EE-10", "rssi": -40},
+            {"mac": "aa:bb:cc:dd:ee:11", "rssi": -50},
+        ],
+    })
+
+    response = await client.get("/api/v1/ble/device-names")
+    names = {item["mac"]: item["name"] for item in response.json()["data"]["names"]}
+    assert names["aa:bb:cc:dd:ee:10"] == "aa:bb:cc:dd:ee:10"
+    assert names["aa:bb:cc:dd:ee:11"] == "aa:bb:cc:dd:ee:11"
+
+
+@pytest.mark.anyio
+async def test_discovery_does_not_overwrite_ble_device_name(client):
+    from src.main import _remember_ble_devices
+
+    mac = "aa:bb:cc:dd:ee:12"
+    await client.put(f"/api/v1/ble/device-names/{mac}", json={"name": "Bedroom sensor"})
+    await _remember_ble_devices({"type": "ble_device_in_range", "mac": mac, "rssi": -45})
+
+    response = await client.get("/api/v1/ble/device-names")
+    names = {item["mac"]: item["name"] for item in response.json()["data"]["names"]}
+    assert names[mac] == "Bedroom sensor"
+

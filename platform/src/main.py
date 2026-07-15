@@ -17,9 +17,11 @@ from .api.router import api_router
 from .api.custom_cmd import public_router as custom_cmd_public_router
 from .ws.manager import manager
 from .services import bridge_service
-from .db.database import init_db
+from .db.database import async_session, init_db
+from .models.custom_cmd import BleDeviceName
 from .models.schemas import SignalTxRequest, SignalRxRequest, SignalExchangeRequest
 from .security import is_allowed
+from sqlalchemy import select
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -61,6 +63,28 @@ def _update_gpio_cache(gpio: int, update: dict):
     """Thread-safe update of the GPIO state cache."""
     entry = _gpio_state_cache.setdefault(gpio, {})
     entry.update(update)
+
+
+async def _remember_ble_devices(event: dict) -> None:
+    if event.get("type") == "ble_in_range_list":
+        devices = event.get("devices", [])
+    elif event.get("type") == "ble_device_in_range":
+        devices = [event]
+    else:
+        return
+    macs = {
+        str(device.get("mac", "")).strip().replace("-", ":").lower()
+        for device in devices
+        if device.get("mac")
+    }
+    if not macs:
+        return
+    async with async_session() as session:
+        result = await session.execute(select(BleDeviceName.mac).where(BleDeviceName.mac.in_(macs)))
+        known_macs = set(result.scalars())
+        for mac in macs - known_macs:
+            session.add(BleDeviceName(mac=mac, name=mac))
+        await session.commit()
 
 
 def _on_bridge_event(event: dict):
@@ -123,7 +147,8 @@ def _on_bridge_event(event: dict):
             asyncio.run_coroutine_threadsafe(manager.broadcast(ws_event), loop)
         elif etype in ("ble_pairing_enabled", "ble_pairing_disabled", "ble_in_range_list",
                        "ble_device_in_range", "ble_device_out_of_range", "ble_rssi"):
-            # 纯透传 — 设备是唯一真相源，后端不缓存
+            if etype in ("ble_in_range_list", "ble_device_in_range"):
+                asyncio.run_coroutine_threadsafe(_remember_ble_devices(event), loop)
             ws_event = {"type": etype, **{k: v for k, v in event.items() if k != "type"}}
             asyncio.run_coroutine_threadsafe(manager.broadcast(ws_event), loop)
         elif etype == "gpio_value":

@@ -3,7 +3,7 @@ import importlib.util
 from pathlib import Path
 import sys
 
-MODULE_PATH = Path(__file__).parents[1] / "homeassistant" / "component" / "protocols" / "tcl.py"
+MODULE_PATH = Path(__file__).parents[1] / "custom_components" / "rose" / "protocols" / "tcl.py"
 spec = importlib.util.spec_from_file_location("rose_tcl", MODULE_PATH)
 assert spec and spec.loader
 rose_tcl = importlib.util.module_from_spec(spec)
