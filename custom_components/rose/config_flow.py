@@ -7,7 +7,6 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_NAME
-from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .client import RoseApiError, RoseClient
@@ -40,7 +39,7 @@ class RoseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
-                {vol.Required(CONF_PLATFORM_URL, default="http://192.168.137.80:8000"): cv.url}
+                {vol.Required(CONF_PLATFORM_URL, default="http://192.168.137.80:8000"): str}
             ),
             errors=errors,
         )
@@ -66,7 +65,7 @@ class RoseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=vol.Schema(
-                {vol.Required(CONF_PLATFORM_URL, default=entry.data[CONF_PLATFORM_URL]): cv.url}
+                {vol.Required(CONF_PLATFORM_URL, default=entry.data[CONF_PLATFORM_URL]): str}
             ),
             errors=errors,
         )
