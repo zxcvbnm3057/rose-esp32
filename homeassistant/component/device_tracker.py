@@ -1,9 +1,7 @@
 """BLE presence trackers for known Rose devices."""
 from __future__ import annotations
 
-from homeassistant.components.device_tracker.config_entry import TrackerEntity
-from homeassistant.components.device_tracker.const import SourceType
-from homeassistant.const import STATE_HOME, STATE_NOT_HOME
+from homeassistant.components.device_tracker import ScannerEntity, SourceType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
@@ -31,7 +29,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
     entry.async_on_unload(coordinator.async_add_listener(discover_from_snapshot))
 
 
-class RoseBleTracker(CoordinatorEntity, TrackerEntity):
+class RoseBleTracker(CoordinatorEntity, ScannerEntity):
     _attr_has_entity_name = True
     _attr_source_type = SourceType.BLUETOOTH_LE
 
@@ -45,9 +43,9 @@ class RoseBleTracker(CoordinatorEntity, TrackerEntity):
         return (self.coordinator.data or {}).get("ble", {}).get(self._mac, {}).get("name", self._mac)
 
     @property
-    def location_name(self):
+    def is_connected(self):
         state = (self.coordinator.data or {}).get("ble", {}).get(self._mac, {})
-        return STATE_HOME if state.get("home") else STATE_NOT_HOME
+        return bool(state.get("home"))
 
     @property
     def extra_state_attributes(self):

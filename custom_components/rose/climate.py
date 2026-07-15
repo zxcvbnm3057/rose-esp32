@@ -71,7 +71,13 @@ class RoseTclClimate(ClimateEntity, RestoreEntity):
 
     @property
     def device_info(self):
-        return {"identifiers": {(DOMAIN, "platform")}, "name": "Rose Platform", "manufacturer": "Rose"}
+        return {
+            "identifiers": {(DOMAIN, f"climate_{self.config_key}")},
+            "name": self._attr_name,
+            "manufacturer": "Rose",
+            "model": "TCL infrared climate controller",
+            "via_device": (DOMAIN, "platform"),
+        }
 
     @property
     def extra_state_attributes(self):
