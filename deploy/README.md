@@ -86,10 +86,13 @@ HA OS 可通过 Samba share、Studio Code Server 或 SSH add-on 写入 `/config`
 1. Settings -> Devices & services -> Add integration。
 2. 搜索 `Rose`。
 3. 填写 HA 可访问的 Platform 地址，默认 `http://192.168.137.80:8000`。
-4. 添加完成后打开 Rose 集成的 Configure 菜单。
-5. 在 UI 中添加、编辑或删除 TCL 空调与 UART 灯。
+4. 打开 Rose 集成条目，通过“添加条目”选择“空调”或“UART 灯”。
+5. 添加空调时先选择稳定标识、显示名称和厂商协议，再填写该协议的红外参数。
+6. 每个空调和 UART 灯都是独立 Config Subentry，可在 Rose 集成条目中直接编辑或删除。
 
-设备的稳定标识只在新增时填写，创建后不能修改；名称、GPIO、首次使用默认温度、重复参数和 UART 指令都可以继续编辑。这样可保持实体 ID、历史和恢复状态稳定。
+Rose 最低要求 Home Assistant 2025.3。设备配置已从旧 `entry.options` 模型直接切换为 Config Subentry，不迁移旧数据；升级后旧版中添加的空调和 UART 灯不会继续加载，需要在 Rose 集成条目中重新添加。
+
+设备的稳定标识只在新增时填写，创建后不能修改；名称、厂商协议、GPIO、首次使用默认温度、重复参数和 UART 指令都可以通过对应 Subentry 的编辑入口修改。稳定标识保持不变，从而保持实体 ID、历史和恢复状态稳定。
 
 第一版实体：
 
@@ -99,6 +102,45 @@ HA OS 可通过 Samba share、Studio Code Server 或 SSH add-on 写入 `/config`
 - platform 上报的每个已知 BLE MAC 对应一个 `device_tracker`
 
 空调和 UART 灯都是单向控制，HA 显示的是最后一次成功发送的乐观状态。
+
+## Mushroom 空调控制卡
+
+Rose 提供了一份基于 `lovelace-mushroom` 的完整空调控制卡示例：
+
+- [rose-climate-mushroom-card.yaml](home-assistant/rose-climate-mushroom-card.yaml)
+
+使用前先在 HACS 的 Frontend 分类安装 `Mushroom` 并重启 Home Assistant，然后：
+
+1. 打开目标 Dashboard，进入编辑模式。
+2. 添加“手动”卡片。
+3. 将示例 YAML 粘贴到卡片编辑器中。
+4. 在 Rose 空调的设备页确认主实体和附属实体 ID，并逐项替换示例中的 `climate.living_room_ac`、`switch.living_room_ac_*` 和 `number.living_room_ac_off_timer`。
+
+例如主实体是 `climate.bedroom_ac`，则同时替换为：
+
+```text
+climate.bedroom_ac
+switch.bedroom_ac_econo
+switch.bedroom_ac_health
+switch.bedroom_ac_turbo
+switch.bedroom_ac_light
+switch.bedroom_ac_aux_heat
+switch.bedroom_ac_sleep
+number.bedroom_ac_off_timer
+```
+
+上面的实体 ID 只是常见生成结果。Home Assistant 可能根据显示名称或实体注册表历史使用不同 ID，应以设备页显示的实际值为准。
+
+组合卡会尽量完整展示以下控制：
+
+- 开关、自动、制冷、制热、除湿、送风模式
+- 目标温度加减
+- 自动、静音、低、中、高风速
+- 关闭、上下、左右、全向扫风
+- 省电、健康、强力、灯光、辅热、睡眠
+- 定时关闭
+
+Mushroom Climate Card 本身只内置目标温度和 HVAC 模式，风速、扫风及扩展功能由同一份 YAML 中的 Mushroom Chips 和 Number Card 补充。协议不支持的扩展实体会保持不可用，卡片无需为不同品牌维护不同布局。
 
 ## 持久化与备份边界
 

@@ -1,19 +1,82 @@
 """UI configuration flows for Rose."""
 from __future__ import annotations
 
-from copy import deepcopy
-
 import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_NAME
+from homeassistant.core import callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .client import RoseApiError, RoseClient
-from .const import CONF_CLIMATES, CONF_LIGHTS, CONF_PLATFORM_URL, DOMAIN
+from .const import (
+    CLIMATE_PROTOCOL_NAMES,
+    CONF_KEY,
+    CONF_PLATFORM_URL,
+    DOMAIN,
+    SUBENTRY_TYPE_CLIMATE,
+    SUBENTRY_TYPE_LIGHT,
+)
 
-CONF_KEY = "key"
+CLIMATE_PROTOCOL_CHOICES = {
+    protocol: name
+    for protocol, name in CLIMATE_PROTOCOL_NAMES.items()
+}
+
+CLIMATE_KEY_CHOICES = {
+    "living_room_ac": "Living room (living_room_ac)",
+    "master_bedroom_ac": "Master bedroom (master_bedroom_ac)",
+    "bedroom_ac": "Bedroom (bedroom_ac)",
+    "second_bedroom_ac": "Second bedroom (second_bedroom_ac)",
+    "children_room_ac": "Children's room (children_room_ac)",
+    "study_ac": "Study (study_ac)",
+    "dining_room_ac": "Dining room (dining_room_ac)",
+    "guest_room_ac": "Guest room (guest_room_ac)",
+    "office_ac": "Office (office_ac)",
+    "ac_01": "ac_01",
+    "ac_02": "ac_02",
+    "ac_03": "ac_03",
+    "ac_04": "ac_04",
+    "ac_05": "ac_05",
+    "ac_06": "ac_06",
+    "ac_07": "ac_07",
+    "ac_08": "ac_08",
+}
+
+LIGHT_KEY_CHOICES = {
+    "living_room_light": "Living room (living_room_light)",
+    "living_room_main_light": "Living room main (living_room_main_light)",
+    "living_room_ambient_light": "Living room ambient (living_room_ambient_light)",
+    "master_bedroom_light": "Master bedroom (master_bedroom_light)",
+    "bedroom_light": "Bedroom (bedroom_light)",
+    "bedroom_ceiling_light": "Bedroom ceiling (bedroom_ceiling_light)",
+    "bedroom_bedside_light": "Bedroom bedside (bedroom_bedside_light)",
+    "second_bedroom_light": "Second bedroom (second_bedroom_light)",
+    "children_room_light": "Children's room (children_room_light)",
+    "study_light": "Study (study_light)",
+    "dining_room_light": "Dining room (dining_room_light)",
+    "kitchen_light": "Kitchen (kitchen_light)",
+    "bathroom_light": "Bathroom (bathroom_light)",
+    "balcony_light": "Balcony (balcony_light)",
+    "entrance_light": "Entrance (entrance_light)",
+    "corridor_light": "Corridor (corridor_light)",
+    "guest_room_light": "Guest room (guest_room_light)",
+    "office_light": "Office (office_light)",
+    "desk_light": "Desk (desk_light)",
+    "light_01": "light_01",
+    "light_02": "light_02",
+    "light_03": "light_03",
+    "light_04": "light_04",
+    "light_05": "light_05",
+    "light_06": "light_06",
+    "light_07": "light_07",
+    "light_08": "light_08",
+    "light_09": "light_09",
+    "light_10": "light_10",
+    "light_11": "light_11",
+    "light_12": "light_12",
+}
 
 
 async def _validate_platform(hass, url: str) -> None:
@@ -21,16 +84,16 @@ async def _validate_platform(hass, url: str) -> None:
     await client.hardware_config()
 
 
-def _is_valid_key(key: str) -> bool:
-    try:
-        cv.slug(key)
-    except vol.Invalid:
-        return False
-    return True
-
-
 class RoseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
+
+    @classmethod
+    @callback
+    def async_get_supported_subentry_types(cls, config_entry):
+        return {
+            SUBENTRY_TYPE_CLIMATE: RoseClimateSubentryFlow,
+            SUBENTRY_TYPE_LIGHT: RoseLightSubentryFlow,
+        }
 
     async def async_step_user(self, user_input=None):
         if self._async_current_entries():
@@ -52,10 +115,6 @@ class RoseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
             errors=errors,
         )
-
-    @staticmethod
-    def async_get_options_flow(config_entry):
-        return RoseOptionsFlow()
 
     async def async_step_reconfigure(self, user_input=None):
         entry = self._get_reconfigure_entry()
@@ -80,18 +139,9 @@ class RoseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 
-class RoseOptionsFlow(config_entries.OptionsFlow):
-    def __init__(self) -> None:
-        self._options: dict | None = None
-        self._selected_key: str | None = None
-
-    def _ensure_options(self) -> dict:
-        if self._options is None:
-            self._options = deepcopy(dict(self.config_entry.options))
-        return self._options
-
+class RoseDeviceSubentryFlow(config_entries.ConfigSubentryFlow):
     def _hardware(self) -> dict:
-        runtime = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id, {})
+        runtime = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
         hardware = runtime.get("hardware", {})
         return hardware if isinstance(hardware, dict) else {}
 
@@ -125,107 +175,33 @@ class RoseOptionsFlow(config_entries.OptionsFlow):
         uart_ids = range(max(0, int(uart_count))) if uart_count else range(3)
         return self._choices(uart_ids, current, lambda uart_id: f"UART {uart_id}")
 
-    async def async_step_init(self, user_input=None):
-        self._ensure_options()
-        return self.async_show_menu(
-            step_id="init",
-            menu_options=[
-                "add_climate",
-                "edit_climate",
-                "delete_climate",
-                "add_light",
-                "edit_light",
-                "delete_light",
-            ],
-        )
-
-    async def async_step_add_climate(self, user_input=None):
-        return await self._climate_form("add_climate", user_input)
-
-    async def async_step_edit_climate(self, user_input=None):
-        return await self._select_device(CONF_CLIMATES, "edit_climate", "climate_form", user_input)
-
-    async def async_step_climate_form(self, user_input=None):
-        return await self._climate_form("climate_form", user_input, self._selected_key)
-
-    async def async_step_delete_climate(self, user_input=None):
-        return await self._delete_device(CONF_CLIMATES, "delete_climate", user_input)
-
-    async def async_step_add_light(self, user_input=None):
-        return await self._light_form("add_light", user_input)
-
-    async def async_step_edit_light(self, user_input=None):
-        return await self._select_device(CONF_LIGHTS, "edit_light", "light_form", user_input)
-
-    async def async_step_light_form(self, user_input=None):
-        return await self._light_form("light_form", user_input, self._selected_key)
-
-    async def async_step_delete_light(self, user_input=None):
-        return await self._delete_device(CONF_LIGHTS, "delete_light", user_input)
-
-    async def _climate_form(self, step_id: str, user_input, existing_key: str | None = None):
-        devices = self._ensure_options().setdefault(CONF_CLIMATES, {})
-        current = devices.get(existing_key, {})
-        errors = {}
-        if user_input is not None:
-            key = existing_key or user_input.pop(CONF_KEY)
-            if not _is_valid_key(key):
-                errors[CONF_KEY] = "invalid_key"
-            elif existing_key is None and key in devices:
-                errors[CONF_KEY] = "already_exists"
-            else:
-                devices[key] = {"protocol": "tcl", **user_input}
-                return self.async_create_entry(title="", data=self._options)
-        schema = {}
-        if existing_key is None:
-            schema[vol.Required(CONF_KEY, default="")] = str
+    def _climate_settings_schema(self, current: dict, include_name: bool = False) -> vol.Schema:
         current_gpio = current.get("gpio", 4)
         current_repeat = current.get("repeat", 1)
-        schema.update(
-            {
-                vol.Required(CONF_NAME, default=current.get(CONF_NAME, "")): cv.string,
-                vol.Required("gpio", default=current_gpio): vol.In(
-                    self._signal_gpio_choices(current_gpio)
-                ),
-                vol.Required("temperature", default=current.get("temperature", 26)): vol.All(
-                    vol.Coerce(float), vol.Range(min=16, max=31)
-                ),
-                vol.Required("repeat", default=current_repeat): vol.In(
-                    self._choices(range(1, 101), current_repeat, str)
-                ),
-                vol.Required("repeat_gap_us", default=current.get("repeat_gap_us", 0)): vol.All(
-                    vol.Coerce(int), vol.Range(min=0, max=100000)
-                ),
-            }
-        )
-        return self.async_show_form(
-            step_id=step_id,
-            data_schema=vol.Schema(schema),
-            errors=errors,
-        )
-
-    async def _light_form(self, step_id: str, user_input, existing_key: str | None = None):
-        devices = self._ensure_options().setdefault(CONF_LIGHTS, {})
-        current = devices.get(existing_key, {})
-        errors = {}
-        if user_input is not None:
-            key = existing_key or user_input.pop(CONF_KEY)
-            if not _is_valid_key(key):
-                errors[CONF_KEY] = "invalid_key"
-            elif existing_key is None and key in devices:
-                errors[CONF_KEY] = "already_exists"
-            else:
-                try:
-                    bytes.fromhex(user_input["on"])
-                    bytes.fromhex(user_input["off"])
-                except ValueError:
-                    errors["base"] = "invalid_hex"
-                else:
-                    devices[key] = user_input
-                    return self.async_create_entry(title="", data=self._options)
         schema = {}
-        if existing_key is None:
-            schema[vol.Required(CONF_KEY, default="")] = str
+        if include_name:
+            schema[vol.Required(CONF_NAME, default=current.get(CONF_NAME, ""))] = cv.string
+        schema.update({
+            vol.Required("gpio", default=current_gpio): vol.In(
+                self._signal_gpio_choices(current_gpio)
+            ),
+            vol.Required("temperature", default=current.get("temperature", 26)): vol.All(
+                vol.Coerce(float), vol.Range(min=16, max=31)
+            ),
+            vol.Required("repeat", default=current_repeat): vol.In(
+                self._choices(range(1, 101), current_repeat, str)
+            ),
+            vol.Required("repeat_gap_us", default=current.get("repeat_gap_us", 0)): vol.All(
+                vol.Coerce(int), vol.Range(min=0, max=100000)
+            ),
+        })
+        return vol.Schema(schema)
+
+    def _light_schema(self, current: dict, include_key: bool) -> vol.Schema:
+        schema = {}
+        if include_key:
+            key_choices = self._available_key_choices(LIGHT_KEY_CHOICES)
+            schema[vol.Required(CONF_KEY, default=next(iter(key_choices)))] = vol.In(key_choices)
         current_uart_id = current.get("uart_id", 1)
         schema.update(
             {
@@ -237,34 +213,112 @@ class RoseOptionsFlow(config_entries.OptionsFlow):
                 vol.Required("off", default=current.get("off", "")): cv.string,
             }
         )
+        return vol.Schema(schema)
+
+    def _available_key_choices(self, choices: dict[str, str]) -> dict[str, str]:
+        used = {
+            subentry.data.get(CONF_KEY)
+            for subentry in self._get_entry().subentries.values()
+        }
+        return {key: label for key, label in choices.items() if key not in used}
+
+
+class RoseClimateSubentryFlow(RoseDeviceSubentryFlow):
+    def __init__(self) -> None:
+        self._pending: dict | None = None
+
+    async def async_step_user(self, user_input=None):
+        key_choices = self._available_key_choices(CLIMATE_KEY_CHOICES)
+        if not key_choices:
+            return self.async_abort(reason="no_available_keys")
+        if user_input is not None:
+            self._pending = dict(user_input)
+            return await self.async_step_protocol()
         return self.async_show_form(
-            step_id=step_id,
-            data_schema=vol.Schema(schema),
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_KEY, default=next(iter(key_choices))): vol.In(key_choices),
+                    vol.Required(CONF_NAME, default=""): cv.string,
+                    vol.Required("protocol", default="tcl"): vol.In(CLIMATE_PROTOCOL_CHOICES),
+                }
+            ),
+        )
+
+    async def async_step_protocol(self, user_input=None):
+        if self._pending is None:
+            return await self.async_step_user()
+        if user_input is not None:
+            data = {**self._pending, **user_input}
+            return self.async_create_entry(
+                title=data[CONF_NAME],
+                data=data,
+                unique_id=f"climate_{data[CONF_KEY]}",
+            )
+        return self.async_show_form(
+            step_id="protocol",
+            data_schema=self._climate_settings_schema({}),
+            description_placeholders={
+                "protocol": CLIMATE_PROTOCOL_CHOICES[self._pending["protocol"]]
+            },
+        )
+
+    async def async_step_reconfigure(self, user_input=None):
+        subentry = self._get_reconfigure_subentry()
+        current = dict(subentry.data)
+        if user_input is not None:
+            data = {CONF_KEY: current[CONF_KEY], **user_input}
+            return self.async_update_and_abort(
+                self._get_entry(), subentry, title=data[CONF_NAME], data=data
+            )
+        schema = self._climate_settings_schema(current, include_name=True).extend(
+            {vol.Required("protocol", default=current.get("protocol", "tcl")): vol.In(CLIMATE_PROTOCOL_CHOICES)}
+        )
+        return self.async_show_form(step_id="reconfigure", data_schema=schema)
+
+
+class RoseLightSubentryFlow(RoseDeviceSubentryFlow):
+    async def async_step_user(self, user_input=None):
+        key_choices = self._available_key_choices(LIGHT_KEY_CHOICES)
+        if not key_choices:
+            return self.async_abort(reason="no_available_keys")
+        errors = {}
+        if user_input is not None:
+            try:
+                bytes.fromhex(user_input["on"])
+                bytes.fromhex(user_input["off"])
+            except ValueError:
+                errors["base"] = "invalid_hex"
+            else:
+                return self.async_create_entry(
+                    title=user_input[CONF_NAME],
+                    data=user_input,
+                    unique_id=f"light_{user_input[CONF_KEY]}",
+                )
+        return self.async_show_form(
+            step_id="user",
+            data_schema=self._light_schema({}, include_key=True),
             errors=errors,
         )
 
-    async def _select_device(self, section: str, step_id: str, next_step: str, user_input):
-        devices = self._ensure_options().get(section, {})
-        if not devices:
-            return self.async_abort(reason="no_devices")
+    async def async_step_reconfigure(self, user_input=None):
+        subentry = self._get_reconfigure_subentry()
+        current = dict(subentry.data)
+        errors = {}
         if user_input is not None:
-            self._selected_key = user_input[CONF_KEY]
-            return await getattr(self, f"async_step_{next_step}")()
-        choices = {key: config.get(CONF_NAME) or key for key, config in devices.items()}
+            try:
+                bytes.fromhex(user_input["on"])
+                bytes.fromhex(user_input["off"])
+            except ValueError:
+                errors["base"] = "invalid_hex"
+            else:
+                data = {CONF_KEY: current[CONF_KEY], **user_input}
+                return self.async_update_and_abort(
+                    self._get_entry(), subentry, title=data[CONF_NAME], data=data
+                )
         return self.async_show_form(
-            step_id=step_id,
-            data_schema=vol.Schema({vol.Required(CONF_KEY): vol.In(choices)}),
+            step_id="reconfigure",
+            data_schema=self._light_schema(current, include_key=False),
+            errors=errors,
         )
 
-    async def _delete_device(self, section: str, step_id: str, user_input):
-        devices = self._ensure_options().get(section, {})
-        if not devices:
-            return self.async_abort(reason="no_devices")
-        if user_input is not None:
-            devices.pop(user_input[CONF_KEY], None)
-            return self.async_create_entry(title="", data=self._options)
-        choices = {key: config.get(CONF_NAME) or key for key, config in devices.items()}
-        return self.async_show_form(
-            step_id=step_id,
-            data_schema=vol.Schema({vol.Required(CONF_KEY): vol.In(choices)}),
-        )

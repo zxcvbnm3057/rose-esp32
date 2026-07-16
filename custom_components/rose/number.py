@@ -3,17 +3,23 @@ from __future__ import annotations
 
 from homeassistant.components.number import NumberEntity, NumberMode
 
-from .const import CONF_CLIMATES, DOMAIN, configured_devices
+from .const import (
+    DOMAIN,
+    SUBENTRY_TYPE_CLIMATE,
+    climate_protocol_name,
+    configured_subentries,
+)
 
 CLIMATE_CAPABILITIES = {"tcl": {"timer"}}
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
     runtime = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        RoseClimateTimer(runtime, key, config)
-        for key, config in configured_devices(entry, CONF_CLIMATES).items()
-    )
+    for subentry_id, key, config in configured_subentries(entry, SUBENTRY_TYPE_CLIMATE):
+        async_add_entities(
+            [RoseClimateTimer(runtime, key, config)],
+            config_subentry_id=subentry_id,
+        )
 
 
 class RoseClimateTimer(NumberEntity):
@@ -31,6 +37,7 @@ class RoseClimateTimer(NumberEntity):
         self._key = key
         self._attr_unique_id = f"rose_climate_{key}_timer"
         self._device_name = config.get("name", key.replace("_", " ").title())
+        self._model = climate_protocol_name(config)
         protocol = config.get("protocol", "tcl")
         self._supported = "timer" in CLIMATE_CAPABILITIES.get(protocol, set())
 
@@ -53,7 +60,7 @@ class RoseClimateTimer(NumberEntity):
             "identifiers": {(DOMAIN, f"climate_{self._key}")},
             "name": self._device_name,
             "manufacturer": "Rose",
-            "model": "TCL infrared climate controller",
+            "model": self._model,
             "via_device": (DOMAIN, "platform"),
         }
 

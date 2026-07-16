@@ -1,24 +1,27 @@
 """UART-backed Rose light entities."""
 from __future__ import annotations
 
-from homeassistant.components.light import LightEntity
+from homeassistant.components.light import ColorMode, LightEntity
 from homeassistant.const import STATE_ON
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import CONF_LIGHTS, DOMAIN, configured_devices
+from .const import DOMAIN, SUBENTRY_TYPE_LIGHT, configured_subentries
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
     runtime = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        RoseUartLight(runtime["client"], key, config)
-        for key, config in configured_devices(entry, CONF_LIGHTS).items()
-    )
+    for subentry_id, key, config in configured_subentries(entry, SUBENTRY_TYPE_LIGHT):
+        async_add_entities(
+            [RoseUartLight(runtime["client"], key, config)],
+            config_subentry_id=subentry_id,
+        )
 
 
 class RoseUartLight(LightEntity, RestoreEntity):
     _attr_has_entity_name = True
     _attr_assumed_state = True
+    _attr_color_mode = ColorMode.ONOFF
+    _attr_supported_color_modes = {ColorMode.ONOFF}
 
     def __init__(self, client, key: str, config: dict) -> None:
         self._client = client

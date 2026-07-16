@@ -23,92 +23,75 @@
             }
         }
     },
-    "options": {
-        "step": {
-            "init": {
-                "title": "Manage Rose",
-                "menu_options": {
-                    "add_climate": "Add TCL air conditioner",
-                    "edit_climate": "Edit air conditioner",
-                    "delete_climate": "Delete air conditioner",
-                    "add_light": "Add UART light",
-                    "edit_light": "Edit light",
-                    "delete_light": "Delete light"
+    "config_subentries": {
+        "climate": {
+            "title": "Air conditioner",
+            "step": {
+                "user": {
+                    "title": "Add air conditioner",
+                    "data": {
+                        "key": "Stable device key",
+                        "name": "Display name",
+                        "protocol": "Manufacturer protocol"
+                    }
+                },
+                "protocol": {
+                    "title": "Configure {protocol}",
+                    "description": "Configure the infrared output for the selected {protocol} protocol.",
+                    "data": {
+                        "gpio": "Infrared GPIO",
+                        "temperature": "Initial target temperature",
+                        "repeat": "Total transmissions",
+                        "repeat_gap_us": "Repeat gap (microseconds)"
+                    }
+                },
+                "reconfigure": {
+                    "title": "Edit air conditioner",
+                    "data": {
+                        "name": "Display name",
+                        "protocol": "Manufacturer protocol",
+                        "gpio": "Infrared GPIO",
+                        "temperature": "Initial target temperature",
+                        "repeat": "Total transmissions",
+                        "repeat_gap_us": "Repeat gap (microseconds)"
+                    }
                 }
             },
-            "add_climate": {
-                "title": "Add TCL air conditioner",
-                "data": {
-                    "key": "Stable device key",
-                    "name": "Display name",
-                    "gpio": "Infrared GPIO",
-                    "temperature": "Initial target temperature",
-                    "repeat": "Total transmissions",
-                    "repeat_gap_us": "Repeat gap (microseconds)"
-                }
-            },
-            "edit_climate": {
-                "title": "Select air conditioner",
-                "data": {
-                    "key": "Air conditioner"
-                }
-            },
-            "climate_form": {
-                "title": "Edit air conditioner",
-                "data": {
-                    "name": "Display name",
-                    "gpio": "Infrared GPIO",
-                    "temperature": "Initial target temperature",
-                    "repeat": "Total transmissions",
-                    "repeat_gap_us": "Repeat gap (microseconds)"
-                }
-            },
-            "delete_climate": {
-                "title": "Delete air conditioner",
-                "data": {
-                    "key": "Air conditioner"
-                }
-            },
-            "add_light": {
-                "title": "Add UART light",
-                "data": {
-                    "key": "Stable device key",
-                    "name": "Display name",
-                    "uart_id": "UART ID",
-                    "on": "On command (hex)",
-                    "off": "Off command (hex)"
-                }
-            },
-            "edit_light": {
-                "title": "Select light",
-                "data": {
-                    "key": "Light"
-                }
-            },
-            "light_form": {
-                "title": "Edit light",
-                "data": {
-                    "name": "Display name",
-                    "uart_id": "UART ID",
-                    "on": "On command (hex)",
-                    "off": "Off command (hex)"
-                }
-            },
-            "delete_light": {
-                "title": "Delete light",
-                "data": {
-                    "key": "Light"
-                }
+            "abort": {
+                "no_available_keys": "All predefined air-conditioner keys are already in use.",
+                "reconfigure_successful": "Air conditioner updated successfully."
             }
         },
-        "error": {
-            "cannot_connect": "Unable to connect to Rose Platform.",
-            "already_exists": "This device key already exists.",
-            "invalid_key": "The device key must contain only lowercase letters, numbers, and underscores.",
-            "invalid_hex": "The UART command is not valid hexadecimal."
-        },
-        "abort": {
-            "no_devices": "No devices of this type are configured."
+        "light": {
+            "title": "UART light",
+            "step": {
+                "user": {
+                    "title": "Add UART light",
+                    "data": {
+                        "key": "Stable device key",
+                        "name": "Display name",
+                        "uart_id": "UART ID",
+                        "on": "On command (hex)",
+                        "off": "Off command (hex)"
+                    }
+                },
+                "reconfigure": {
+                    "title": "Edit UART light",
+                    "data": {
+                        "name": "Display name",
+                        "uart_id": "UART ID",
+                        "on": "On command (hex)",
+                        "off": "Off command (hex)"
+                    }
+                }
+            },
+            "error": {
+                "invalid_hex": "The UART command is not valid hexadecimal."
+            },
+            "abort": {
+                "no_available_keys": "All predefined UART light keys are already in use.",
+                "reconfigure_successful": "UART light updated successfully."
+            }
         }
     },
     "services": {

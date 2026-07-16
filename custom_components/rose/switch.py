@@ -3,7 +3,12 @@ from __future__ import annotations
 
 from homeassistant.components.switch import SwitchEntity
 
-from .const import CONF_CLIMATES, DOMAIN, configured_devices
+from .const import (
+    DOMAIN,
+    SUBENTRY_TYPE_CLIMATE,
+    climate_protocol_name,
+    configured_subentries,
+)
 
 CLIMATE_CAPABILITIES = {
     "tcl": {"econo", "health", "turbo", "light", "aux_heat"},
@@ -21,11 +26,14 @@ SWITCHES = {
 
 async def async_setup_entry(hass, entry, async_add_entities):
     runtime = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        RoseClimateSwitch(runtime, key, config, option, name)
-        for key, config in configured_devices(entry, CONF_CLIMATES).items()
-        for option, name in SWITCHES.items()
-    )
+    for subentry_id, key, config in configured_subentries(entry, SUBENTRY_TYPE_CLIMATE):
+        async_add_entities(
+            [
+                RoseClimateSwitch(runtime, key, config, option, name)
+                for option, name in SWITCHES.items()
+            ],
+            config_subentry_id=subentry_id,
+        )
 
 
 class RoseClimateSwitch(SwitchEntity):
@@ -39,6 +47,7 @@ class RoseClimateSwitch(SwitchEntity):
         self._attr_translation_key = translation_key
         self._attr_unique_id = f"rose_climate_{key}_{option}"
         self._device_name = config.get("name", key.replace("_", " ").title())
+        self._model = climate_protocol_name(config)
         protocol = config.get("protocol", "tcl")
         self._supported = option in CLIMATE_CAPABILITIES.get(protocol, set())
 
@@ -61,7 +70,7 @@ class RoseClimateSwitch(SwitchEntity):
             "identifiers": {(DOMAIN, f"climate_{self._key}")},
             "name": self._device_name,
             "manufacturer": "Rose",
-            "model": "TCL infrared climate controller",
+            "model": self._model,
             "via_device": (DOMAIN, "platform"),
         }
 

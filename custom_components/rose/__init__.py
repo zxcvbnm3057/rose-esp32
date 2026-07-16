@@ -86,29 +86,26 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_remove_config_entry_device(
     hass: HomeAssistant, entry: ConfigEntry, device_entry: DeviceEntry
 ) -> bool:
-    managed_identifiers = {(DOMAIN, "platform")}
-    managed_identifiers.update(
-        (DOMAIN, f"climate_{key}")
-        for key in entry.options.get("climates", {})
-    )
-    managed_identifiers.update(
-        (DOMAIN, f"light_{key}")
-        for key in entry.options.get("lights", {})
-    )
-    runtime = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-    coordinator = runtime.get("coordinator")
-    ble_devices = (coordinator.data or {}).get("ble", {}) if coordinator else {}
-    managed_identifiers.update((DOMAIN, f"ble_{mac}") for mac in ble_devices)
     rose_identifiers = {
         identifier
         for domain, identifier in device_entry.identifiers
         if domain == DOMAIN
     }
+    managed_identifiers = {(DOMAIN, "platform")}
+    managed_identifiers.update(
+        (DOMAIN, identifier)
+        for subentry in entry.subentries.values()
+        if (identifier := subentry.unique_id) is not None
+    )
+    runtime = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    coordinator = runtime.get("coordinator")
+    ble_devices = (coordinator.data or {}).get("ble", {}) if coordinator else {}
+    managed_identifiers.update((DOMAIN, f"ble_{mac}") for mac in ble_devices)
     return (
         bool(rose_identifiers)
         and device_entry.identifiers.isdisjoint(managed_identifiers)
         and all(
-            identifier.startswith(("climate_", "light_", "ble_"))
+            identifier.startswith("ble_")
             for identifier in rose_identifiers
         )
     )

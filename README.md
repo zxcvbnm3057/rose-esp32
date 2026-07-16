@@ -27,11 +27,15 @@ Rose 集成提供：
 3. 类型选择 `Integration`。
 4. 安装 `Rose` 并重启 Home Assistant。
 5. Settings -> Devices & services -> Add integration -> Rose。
-6. 填写 `http://192.168.137.80:8000`，然后在 Configure 菜单中添加设备。
+6. 填写 `http://192.168.137.80:8000`，然后在 Rose 集成条目中添加“空调”或“UART 灯”子条目。
+
+Rose 最低要求 Home Assistant 2025.3。空调和 UART 灯使用 Config Subentry 原生管理，可在集成条目中分别添加、编辑和删除。
 
 [在 HACS 中打开此仓库](https://my.home-assistant.io/redirect/hacs_repository/?owner=zxcvbnm3057&repository=rose-esp32&category=integration)
 
 HACS 直接从仓库默认分支的 `custom_components/rose` 安装源码，不需要 GitHub Release、ZIP 安装包或 GitHub Actions。更新默认分支后，在 HACS 中重新下载 Rose 即可获取最新源码。
+
+空调 Dashboard 可使用 Mushroom 完整控制卡示例：[deploy/home-assistant/rose-climate-mushroom-card.yaml](deploy/home-assistant/rose-climate-mushroom-card.yaml)。安装与实体 ID 替换步骤见 [deploy/README.md](deploy/README.md#mushroom-空调控制卡)。
 
 ## 部署
 

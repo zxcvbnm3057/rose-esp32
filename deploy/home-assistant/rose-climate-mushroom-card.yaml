@@ -1,0 +1,197 @@
+# Install Mushroom from HACS before using this card.
+# Replace living_room_ac in every entity ID with the actual Home Assistant entity ID suffix.
+type: vertical-stack
+cards:
+  - type: custom:mushroom-climate-card
+    entity: climate.living_room_ac
+    name: 空调
+    icon: mdi:air-conditioner
+    layout: default
+    fill_container: true
+    show_temperature_control: true
+    collapsible_controls: false
+    hvac_modes:
+      - "off"
+      - auto
+      - cool
+      - heat
+      - dry
+      - fan_only
+
+  - type: custom:mushroom-title-card
+    subtitle: 风速
+
+  - type: custom:mushroom-chips-card
+    alignment: justify
+    chips:
+      - type: template
+        entity: climate.living_room_ac
+        icon: mdi:fan-auto
+        content: 自动
+        color: "{{ 'blue' if state_attr(entity, 'fan_mode') == 'auto' else 'disabled' }}"
+        tap_action:
+          action: perform-action
+          perform_action: climate.set_fan_mode
+          target:
+            entity_id: climate.living_room_ac
+          data:
+            fan_mode: auto
+      - type: template
+        entity: climate.living_room_ac
+        icon: mdi:fan-speed-1
+        content: 静音
+        color: "{{ 'blue' if state_attr(entity, 'fan_mode') == 'min' else 'disabled' }}"
+        tap_action:
+          action: perform-action
+          perform_action: climate.set_fan_mode
+          target:
+            entity_id: climate.living_room_ac
+          data:
+            fan_mode: min
+      - type: template
+        entity: climate.living_room_ac
+        icon: mdi:fan-speed-1
+        content: 低
+        color: "{{ 'blue' if state_attr(entity, 'fan_mode') == 'low' else 'disabled' }}"
+        tap_action:
+          action: perform-action
+          perform_action: climate.set_fan_mode
+          target:
+            entity_id: climate.living_room_ac
+          data:
+            fan_mode: low
+      - type: template
+        entity: climate.living_room_ac
+        icon: mdi:fan-speed-2
+        content: 中
+        color: "{{ 'blue' if state_attr(entity, 'fan_mode') == 'medium' else 'disabled' }}"
+        tap_action:
+          action: perform-action
+          perform_action: climate.set_fan_mode
+          target:
+            entity_id: climate.living_room_ac
+          data:
+            fan_mode: medium
+      - type: template
+        entity: climate.living_room_ac
+        icon: mdi:fan-speed-3
+        content: 高
+        color: "{{ 'blue' if state_attr(entity, 'fan_mode') == 'high' else 'disabled' }}"
+        tap_action:
+          action: perform-action
+          perform_action: climate.set_fan_mode
+          target:
+            entity_id: climate.living_room_ac
+          data:
+            fan_mode: high
+
+  - type: custom:mushroom-title-card
+    subtitle: 扫风
+
+  - type: custom:mushroom-chips-card
+    alignment: justify
+    chips:
+      - type: template
+        entity: climate.living_room_ac
+        icon: mdi:arrow-collapse
+        content: 关闭
+        color: "{{ 'blue' if state_attr(entity, 'swing_mode') == 'off' else 'disabled' }}"
+        tap_action:
+          action: perform-action
+          perform_action: climate.set_swing_mode
+          target:
+            entity_id: climate.living_room_ac
+          data:
+            swing_mode: "off"
+      - type: template
+        entity: climate.living_room_ac
+        icon: mdi:arrow-up-down
+        content: 上下
+        color: "{{ 'blue' if state_attr(entity, 'swing_mode') == 'vertical' else 'disabled' }}"
+        tap_action:
+          action: perform-action
+          perform_action: climate.set_swing_mode
+          target:
+            entity_id: climate.living_room_ac
+          data:
+            swing_mode: vertical
+      - type: template
+        entity: climate.living_room_ac
+        icon: mdi:arrow-left-right
+        content: 左右
+        color: "{{ 'blue' if state_attr(entity, 'swing_mode') == 'horizontal' else 'disabled' }}"
+        tap_action:
+          action: perform-action
+          perform_action: climate.set_swing_mode
+          target:
+            entity_id: climate.living_room_ac
+          data:
+            swing_mode: horizontal
+      - type: template
+        entity: climate.living_room_ac
+        icon: mdi:arrow-all
+        content: 全向
+        color: "{{ 'blue' if state_attr(entity, 'swing_mode') == 'both' else 'disabled' }}"
+        tap_action:
+          action: perform-action
+          perform_action: climate.set_swing_mode
+          target:
+            entity_id: climate.living_room_ac
+          data:
+            swing_mode: both
+
+  - type: custom:mushroom-title-card
+    subtitle: 扩展功能
+
+  - type: custom:mushroom-chips-card
+    alignment: justify
+    chips:
+      - type: entity
+        entity: switch.living_room_ac_econo
+        name: 省电
+        content_info: name
+        icon: mdi:leaf
+        tap_action:
+          action: toggle
+      - type: entity
+        entity: switch.living_room_ac_health
+        name: 健康
+        content_info: name
+        icon: mdi:air-filter
+        tap_action:
+          action: toggle
+      - type: entity
+        entity: switch.living_room_ac_turbo
+        name: 强力
+        content_info: name
+        icon: mdi:rocket-launch
+        tap_action:
+          action: toggle
+      - type: entity
+        entity: switch.living_room_ac_light
+        name: 灯光
+        content_info: name
+        icon: mdi:lightbulb
+        tap_action:
+          action: toggle
+      - type: entity
+        entity: switch.living_room_ac_aux_heat
+        name: 辅热
+        content_info: name
+        icon: mdi:radiator
+        tap_action:
+          action: toggle
+      - type: entity
+        entity: switch.living_room_ac_sleep
+        name: 睡眠
+        content_info: name
+        icon: mdi:sleep
+        tap_action:
+          action: toggle
+
+  - type: custom:mushroom-number-card
+    entity: number.living_room_ac_off_timer
+    name: 定时关闭
+    icon: mdi:timer-outline
+    icon_color: blue
+    display_mode: buttons

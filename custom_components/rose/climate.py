@@ -2,13 +2,19 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 from homeassistant.components.climate import ClimateEntity
 from homeassistant.components.climate.const import ClimateEntityFeature, HVACMode
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import CONF_CLIMATES, DOMAIN, configured_devices
+from .const import (
+    DOMAIN,
+    SUBENTRY_TYPE_CLIMATE,
+    climate_protocol_name,
+    configured_subentries,
+)
 from .protocols.tcl import TclFanMode, TclHvacMode, TclPowerState, TclState, encode_tcl_ir_signal
 
 HVAC_TO_TCL = {
@@ -22,13 +28,14 @@ HVAC_TO_TCL = {
 
 async def async_setup_entry(hass, entry, async_add_entities):
     runtime = hass.data[DOMAIN][entry.entry_id]
-    entities = [
-        RoseTclClimate(runtime["client"], key, config)
-        for key, config in configured_devices(entry, CONF_CLIMATES).items()
-        if config.get("protocol", "tcl") == "tcl"
-    ]
-    runtime["climate_entities"] = {entity.config_key: entity for entity in entities}
-    async_add_entities(entities)
+    entities = {}
+    for subentry_id, key, config in configured_subentries(entry, SUBENTRY_TYPE_CLIMATE):
+        if config.get("protocol", "tcl") != "tcl":
+            continue
+        entity = RoseTclClimate(runtime["client"], key, config)
+        entities[key] = entity
+        async_add_entities([entity], config_subentry_id=subentry_id)
+    runtime["climate_entities"] = entities
 
 
 class RoseTclClimate(ClimateEntity, RestoreEntity):
@@ -60,6 +67,7 @@ class RoseTclClimate(ClimateEntity, RestoreEntity):
         self._attr_target_temperature = float(config.get("temperature", 26))
         self._attr_fan_mode = TclFanMode.AUTO.value
         self._attr_swing_mode = "vertical"
+        self._control_listeners: list[Callable[[], None]] = []
         self._extra = {
             "econo": False,
             "health": False,
@@ -75,13 +83,22 @@ class RoseTclClimate(ClimateEntity, RestoreEntity):
             "identifiers": {(DOMAIN, f"climate_{self.config_key}")},
             "name": self._attr_name,
             "manufacturer": "Rose",
-            "model": "TCL infrared climate controller",
+            "model": climate_protocol_name(self._config),
             "via_device": (DOMAIN, "platform"),
         }
 
     @property
     def extra_state_attributes(self):
         return {**self._extra, "last_active_mode": self._last_active_mode}
+
+    def add_control_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
+        self._control_listeners.append(listener)
+
+        def remove_listener() -> None:
+            if listener in self._control_listeners:
+                self._control_listeners.remove(listener)
+
+        return remove_listener
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -136,6 +153,8 @@ class RoseTclClimate(ClimateEntity, RestoreEntity):
             int(self._config.get("repeat", 1)), int(self._config.get("repeat_gap_us", 0)),
         )
         self.async_write_ha_state()
+        for listener in tuple(self._control_listeners):
+            listener()
 
     async def async_set_hvac_mode(self, hvac_mode):
         if hvac_mode != HVACMode.OFF:
