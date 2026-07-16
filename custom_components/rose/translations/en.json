@@ -30,7 +30,7 @@
                 "user": {
                     "title": "Add air conditioner",
                     "data": {
-                        "key": "Stable device key",
+                        "key": "Stable device key (lowercase letters, numbers, and underscores)",
                         "name": "Display name",
                         "protocol": "Manufacturer protocol"
                     }
@@ -57,8 +57,11 @@
                     }
                 }
             },
+            "error": {
+                "invalid_key": "The device key must contain only lowercase letters, numbers, and underscores.",
+                "key_already_in_use": "This stable device key is already in use."
+            },
             "abort": {
-                "no_available_keys": "All predefined air-conditioner keys are already in use.",
                 "reconfigure_successful": "Air conditioner updated successfully."
             }
         },
@@ -68,7 +71,7 @@
                 "user": {
                     "title": "Add UART light",
                     "data": {
-                        "key": "Stable device key",
+                        "key": "Stable device key (lowercase letters, numbers, and underscores)",
                         "name": "Display name",
                         "uart_id": "UART ID",
                         "on": "On command (hex)",
@@ -86,10 +89,11 @@
                 }
             },
             "error": {
-                "invalid_hex": "The UART command is not valid hexadecimal."
+                "invalid_hex": "The UART command is not valid hexadecimal.",
+                "invalid_key": "The device key must contain only lowercase letters, numbers, and underscores.",
+                "key_already_in_use": "This stable device key is already in use."
             },
             "abort": {
-                "no_available_keys": "All predefined UART light keys are already in use.",
                 "reconfigure_successful": "UART light updated successfully."
             }
         }

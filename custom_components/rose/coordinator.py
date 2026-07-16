@@ -8,15 +8,12 @@ import logging
 
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
+from .ble_state import merge_ble_devices, normalize_mac
 from .client import RoseApiError, RoseClient
 from .const import EVENT_BLE_PRESENCE
 
 LOGGER = logging.getLogger(__name__)
 WS_RECONNECT_MAX_DELAY = 30
-
-
-def normalize_mac(value: str) -> str:
-    return value.strip().replace("-", ":").lower()
 
 
 def next_reconnect_delay(current: int) -> int:
@@ -54,23 +51,21 @@ class RoseCoordinator(DataUpdateCoordinator[dict]):
     async def _async_update_data(self) -> dict:
         try:
             status = await self.client.device_status()
-            previous = (self.data or {}).get("ble", {})
-            ble = {mac: dict(state) for mac, state in previous.items()}
-            if status.get("connected"):
-                names = await self.client.ble_device_names()
-                snapshot = {
-                    normalize_mac(device["mac"]): device
-                    for device in await self.client.ble_in_range()
-                }
-                for mac in set(ble) | set(names) | set(snapshot):
-                    ble[mac] = {
-                        "home": mac in snapshot,
-                        "rssi": snapshot.get(mac, {}).get("rssi"),
-                        "name": names.get(mac) or ble.get(mac, {}).get("name") or mac,
-                    }
-            return {**status, "ble": ble}
         except RoseApiError as exc:
             raise UpdateFailed(str(exc)) from exc
+
+        previous = (self.data or {}).get("ble", {})
+        try:
+            names = await self.client.ble_device_names()
+        except RoseApiError:
+            names = {}
+
+        try:
+            snapshot = await self.client.ble_in_range()
+        except RoseApiError:
+            snapshot = []
+        ble = merge_ble_devices(previous, names, snapshot)
+        return {**status, "ble": ble}
 
     async def async_start_websocket(self) -> None:
         if self._ws_task is None or self._ws_task.done():

@@ -24,60 +24,6 @@ CLIMATE_PROTOCOL_CHOICES = {
     for protocol, name in CLIMATE_PROTOCOL_NAMES.items()
 }
 
-CLIMATE_KEY_CHOICES = {
-    "living_room_ac": "Living room (living_room_ac)",
-    "master_bedroom_ac": "Master bedroom (master_bedroom_ac)",
-    "bedroom_ac": "Bedroom (bedroom_ac)",
-    "second_bedroom_ac": "Second bedroom (second_bedroom_ac)",
-    "children_room_ac": "Children's room (children_room_ac)",
-    "study_ac": "Study (study_ac)",
-    "dining_room_ac": "Dining room (dining_room_ac)",
-    "guest_room_ac": "Guest room (guest_room_ac)",
-    "office_ac": "Office (office_ac)",
-    "ac_01": "ac_01",
-    "ac_02": "ac_02",
-    "ac_03": "ac_03",
-    "ac_04": "ac_04",
-    "ac_05": "ac_05",
-    "ac_06": "ac_06",
-    "ac_07": "ac_07",
-    "ac_08": "ac_08",
-}
-
-LIGHT_KEY_CHOICES = {
-    "living_room_light": "Living room (living_room_light)",
-    "living_room_main_light": "Living room main (living_room_main_light)",
-    "living_room_ambient_light": "Living room ambient (living_room_ambient_light)",
-    "master_bedroom_light": "Master bedroom (master_bedroom_light)",
-    "bedroom_light": "Bedroom (bedroom_light)",
-    "bedroom_ceiling_light": "Bedroom ceiling (bedroom_ceiling_light)",
-    "bedroom_bedside_light": "Bedroom bedside (bedroom_bedside_light)",
-    "second_bedroom_light": "Second bedroom (second_bedroom_light)",
-    "children_room_light": "Children's room (children_room_light)",
-    "study_light": "Study (study_light)",
-    "dining_room_light": "Dining room (dining_room_light)",
-    "kitchen_light": "Kitchen (kitchen_light)",
-    "bathroom_light": "Bathroom (bathroom_light)",
-    "balcony_light": "Balcony (balcony_light)",
-    "entrance_light": "Entrance (entrance_light)",
-    "corridor_light": "Corridor (corridor_light)",
-    "guest_room_light": "Guest room (guest_room_light)",
-    "office_light": "Office (office_light)",
-    "desk_light": "Desk (desk_light)",
-    "light_01": "light_01",
-    "light_02": "light_02",
-    "light_03": "light_03",
-    "light_04": "light_04",
-    "light_05": "light_05",
-    "light_06": "light_06",
-    "light_07": "light_07",
-    "light_08": "light_08",
-    "light_09": "light_09",
-    "light_10": "light_10",
-    "light_11": "light_11",
-    "light_12": "light_12",
-}
-
 
 async def _validate_platform(hass, url: str) -> None:
     client = RoseClient(async_get_clientsession(hass), url)
@@ -200,8 +146,7 @@ class RoseDeviceSubentryFlow(config_entries.ConfigSubentryFlow):
     def _light_schema(self, current: dict, include_key: bool) -> vol.Schema:
         schema = {}
         if include_key:
-            key_choices = self._available_key_choices(LIGHT_KEY_CHOICES)
-            schema[vol.Required(CONF_KEY, default=next(iter(key_choices)))] = vol.In(key_choices)
+            schema[vol.Required(CONF_KEY, default="")] = cv.string
         current_uart_id = current.get("uart_id", 1)
         schema.update(
             {
@@ -215,12 +160,17 @@ class RoseDeviceSubentryFlow(config_entries.ConfigSubentryFlow):
         )
         return vol.Schema(schema)
 
-    def _available_key_choices(self, choices: dict[str, str]) -> dict[str, str]:
-        used = {
-            subentry.data.get(CONF_KEY)
+    def _key_error(self, key: str) -> str | None:
+        try:
+            cv.slug(key)
+        except vol.Invalid:
+            return "invalid_key"
+        if any(
+            subentry.data.get(CONF_KEY) == key
             for subentry in self._get_entry().subentries.values()
-        }
-        return {key: label for key, label in choices.items() if key not in used}
+        ):
+            return "key_already_in_use"
+        return None
 
 
 class RoseClimateSubentryFlow(RoseDeviceSubentryFlow):
@@ -228,21 +178,23 @@ class RoseClimateSubentryFlow(RoseDeviceSubentryFlow):
         self._pending: dict | None = None
 
     async def async_step_user(self, user_input=None):
-        key_choices = self._available_key_choices(CLIMATE_KEY_CHOICES)
-        if not key_choices:
-            return self.async_abort(reason="no_available_keys")
+        errors = {}
         if user_input is not None:
-            self._pending = dict(user_input)
-            return await self.async_step_protocol()
+            if error := self._key_error(user_input[CONF_KEY]):
+                errors[CONF_KEY] = error
+            else:
+                self._pending = dict(user_input)
+                return await self.async_step_protocol()
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_KEY, default=next(iter(key_choices))): vol.In(key_choices),
+                    vol.Required(CONF_KEY, default=""): cv.string,
                     vol.Required(CONF_NAME, default=""): cv.string,
                     vol.Required("protocol", default="tcl"): vol.In(CLIMATE_PROTOCOL_CHOICES),
                 }
             ),
+            errors=errors,
         )
 
     async def async_step_protocol(self, user_input=None):
@@ -279,22 +231,22 @@ class RoseClimateSubentryFlow(RoseDeviceSubentryFlow):
 
 class RoseLightSubentryFlow(RoseDeviceSubentryFlow):
     async def async_step_user(self, user_input=None):
-        key_choices = self._available_key_choices(LIGHT_KEY_CHOICES)
-        if not key_choices:
-            return self.async_abort(reason="no_available_keys")
         errors = {}
         if user_input is not None:
-            try:
-                bytes.fromhex(user_input["on"])
-                bytes.fromhex(user_input["off"])
-            except ValueError:
-                errors["base"] = "invalid_hex"
+            if error := self._key_error(user_input[CONF_KEY]):
+                errors[CONF_KEY] = error
             else:
-                return self.async_create_entry(
-                    title=user_input[CONF_NAME],
-                    data=user_input,
-                    unique_id=f"light_{user_input[CONF_KEY]}",
-                )
+                try:
+                    bytes.fromhex(user_input["on"])
+                    bytes.fromhex(user_input["off"])
+                except ValueError:
+                    errors["base"] = "invalid_hex"
+                else:
+                    return self.async_create_entry(
+                        title=user_input[CONF_NAME],
+                        data=user_input,
+                        unique_id=f"light_{user_input[CONF_KEY]}",
+                    )
         return self.async_show_form(
             step_id="user",
             data_schema=self._light_schema({}, include_key=True),

@@ -30,7 +30,7 @@
                 "user": {
                     "title": "添加空调",
                     "data": {
-                        "key": "稳定设备标识",
+                        "key": "稳定设备标识（小写字母、数字和下划线）",
                         "name": "显示名称",
                         "protocol": "厂商协议"
                     }
@@ -57,8 +57,11 @@
                     }
                 }
             },
+            "error": {
+                "invalid_key": "设备标识只能包含小写字母、数字和下划线。",
+                "key_already_in_use": "该稳定设备标识已被使用。"
+            },
             "abort": {
-                "no_available_keys": "所有预定义空调标识均已使用。",
                 "reconfigure_successful": "空调配置已更新。"
             }
         },
@@ -68,7 +71,7 @@
                 "user": {
                     "title": "添加 UART 灯",
                     "data": {
-                        "key": "稳定设备标识",
+                        "key": "稳定设备标识（小写字母、数字和下划线）",
                         "name": "显示名称",
                         "uart_id": "UART 编号",
                         "on": "开灯指令（十六进制）",
@@ -86,10 +89,11 @@
                 }
             },
             "error": {
-                "invalid_hex": "UART 指令不是有效的十六进制。"
+                "invalid_hex": "UART 指令不是有效的十六进制。",
+                "invalid_key": "设备标识只能包含小写字母、数字和下划线。",
+                "key_already_in_use": "该稳定设备标识已被使用。"
             },
             "abort": {
-                "no_available_keys": "所有预定义 UART 灯标识均已使用。",
                 "reconfigure_successful": "UART 灯配置已更新。"
             }
         }
