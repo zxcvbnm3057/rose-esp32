@@ -103,33 +103,20 @@ Rose 最低要求 Home Assistant 2025.3。设备配置已从旧 `entry.options` 
 
 空调和 UART 灯都是单向控制，HA 显示的是最后一次成功发送的乐观状态。
 
-## Mushroom 空调控制卡
+## 空调遥控器卡
 
-Rose 提供了一份基于 `lovelace-mushroom` 的完整空调控制卡示例：
+Rose 自带专用 Lovelace 空调遥控器卡，按实体遥控器样式固定展示温度显示区、运行状态、模式、风速、扫风和扩展功能按键，不依赖 Mushroom：
 
-- [rose-climate-mushroom-card.yaml](home-assistant/rose-climate-mushroom-card.yaml)
+- [rose-climate-remote-card.yaml](home-assistant/rose-climate-remote-card.yaml)
 
-使用前先在 HACS 的 Frontend 分类安装 `Mushroom` 并重启 Home Assistant，然后：
+集成会自动加载 `custom:rose-climate-remote-card`，无需手动添加 Dashboard Resource。重启 Home Assistant 后：
 
 1. 打开目标 Dashboard，进入编辑模式。
 2. 添加“手动”卡片。
 3. 将示例 YAML 粘贴到卡片编辑器中。
-4. 在 Rose 空调的设备页确认主实体和附属实体 ID，并逐项替换示例中的 `climate.living_room_ac`、`switch.living_room_ac_*` 和 `number.living_room_ac_off_timer`。
+4. 只需把 `climate.living_room_ac` 替换为设备页显示的实际主空调实体 ID。
 
-例如主实体是 `climate.bedroom_ac`，则同时替换为：
-
-```text
-climate.bedroom_ac
-switch.bedroom_ac_econo
-switch.bedroom_ac_health
-switch.bedroom_ac_turbo
-switch.bedroom_ac_light
-switch.bedroom_ac_aux_heat
-switch.bedroom_ac_sleep
-number.bedroom_ac_off_timer
-```
-
-上面的实体 ID 只是常见生成结果。Home Assistant 可能根据显示名称或实体注册表历史使用不同 ID，应以设备页显示的实际值为准。
+卡片会根据主实体的 Rose unique ID 自动查找同一设备下的扩展开关和定时器，不再需要手工填写 `switch.*` 或 `number.*` 实体 ID。
 
 组合卡会尽量完整展示以下控制：
 
@@ -140,7 +127,7 @@ number.bedroom_ac_off_timer
 - 省电、健康、强力、灯光、辅热、睡眠
 - 定时关闭
 
-Mushroom Climate Card 本身只内置目标温度和 HVAC 模式，风速、扫风及扩展功能由同一份 YAML 中的 Mushroom Chips 和 Number Card 补充。协议不支持的扩展实体会保持不可用，卡片无需为不同品牌维护不同布局。
+协议不支持或实体未启用的按键会固定保留并显示为禁用，遥控器布局不会因品牌能力不同而改变。模式、风速和扫风按键会在每次点击时循环到下一档；点击定时按钮会打开对应定时器详情。
 
 ## 持久化与备份边界
 

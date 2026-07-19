@@ -26,6 +26,11 @@
     "config_subentries": {
         "climate": {
             "title": "空调",
+            "entry_type": "空调",
+            "initiate_flow": {
+                "user": "添加空调",
+                "reconfigure": "编辑空调"
+            },
             "step": {
                 "user": {
                     "title": "添加空调",
@@ -67,6 +72,11 @@
         },
         "light": {
             "title": "UART 灯",
+            "entry_type": "UART 灯",
+            "initiate_flow": {
+                "user": "添加 UART 灯",
+                "reconfigure": "编辑 UART 灯"
+            },
             "step": {
                 "user": {
                     "title": "添加 UART 灯",

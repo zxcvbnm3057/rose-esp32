@@ -26,6 +26,11 @@
     "config_subentries": {
         "climate": {
             "title": "Air conditioner",
+            "entry_type": "Air conditioner",
+            "initiate_flow": {
+                "user": "Add air conditioner",
+                "reconfigure": "Edit air conditioner"
+            },
             "step": {
                 "user": {
                     "title": "Add air conditioner",
@@ -67,6 +72,11 @@
         },
         "light": {
             "title": "UART light",
+            "entry_type": "UART light",
+            "initiate_flow": {
+                "user": "Add UART light",
+                "reconfigure": "Edit UART light"
+            },
             "step": {
                 "user": {
                     "title": "Add UART light",

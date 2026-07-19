@@ -16,7 +16,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         if mac in added_macs:
             return
         added_macs.add(mac)
-        async_add_entities([RoseBleTracker(coordinator, mac)])
+        async_add_entities([RoseBleTracker(coordinator, mac, added_macs.discard)])
 
     for mac in (coordinator.data or {}).get("ble", {}):
         add_tracker(mac)
@@ -33,10 +33,15 @@ class RoseBleTracker(CoordinatorEntity, ScannerEntity):
     _attr_has_entity_name = True
     _attr_source_type = SourceType.BLUETOOTH_LE
 
-    def __init__(self, coordinator, mac: str) -> None:
+    def __init__(self, coordinator, mac: str, on_remove) -> None:
         super().__init__(coordinator)
         self._mac = mac
+        self._on_remove = on_remove
         self._attr_unique_id = f"rose_ble_{self._mac.replace(':', '')}"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(lambda: self._on_remove(self._mac))
 
     @property
     def name(self):

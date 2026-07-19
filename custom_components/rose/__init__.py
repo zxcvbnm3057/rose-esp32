@@ -1,8 +1,12 @@
 """Rose Home Assistant integration."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import voluptuous as vol
 
+from homeassistant.components.frontend import add_extra_js_url
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
@@ -13,6 +17,17 @@ from homeassistant.helpers.device_registry import DeviceEntry
 from .client import RoseApiError, RoseClient
 from .const import CONF_PLATFORM_URL, DOMAIN, PLATFORMS
 from .coordinator import RoseCoordinator
+
+FRONTEND_URL = "/rose_frontend"
+FRONTEND_MODULE_URL = f"{FRONTEND_URL}/rose-climate-remote-card.js"
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(FRONTEND_URL, str(Path(__file__).parent / "www"), cache_headers=False)]
+    )
+    add_extra_js_url(hass, FRONTEND_MODULE_URL)
+    return True
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     client = RoseClient(async_get_clientsession(hass), entry.data[CONF_PLATFORM_URL])

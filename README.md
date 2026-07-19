@@ -35,7 +35,7 @@ Rose 最低要求 Home Assistant 2025.3。空调和 UART 灯使用 Config Subent
 
 HACS 直接从仓库默认分支的 `custom_components/rose` 安装源码，不需要 GitHub Release、ZIP 安装包或 GitHub Actions。更新默认分支后，在 HACS 中重新下载 Rose 即可获取最新源码。
 
-空调 Dashboard 可使用 Mushroom 完整控制卡示例：[deploy/home-assistant/rose-climate-mushroom-card.yaml](deploy/home-assistant/rose-climate-mushroom-card.yaml)。安装与实体 ID 替换步骤见 [deploy/README.md](deploy/README.md#mushroom-空调控制卡)。
+空调 Dashboard 可使用 Rose 自带的固定遥控器卡：[deploy/home-assistant/rose-climate-remote-card.yaml](deploy/home-assistant/rose-climate-remote-card.yaml)。卡片不依赖 Mushroom，只需配置主 `climate` 实体；使用步骤见 [deploy/README.md](deploy/README.md#空调遥控器卡)。
 
 ## 部署
 

@@ -6,6 +6,10 @@
   ],
   "config_flow": true,
   "documentation": "https://github.com/zxcvbnm3057/rose-esp32#readme",
+  "dependencies": [
+    "frontend",
+    "http"
+  ],
   "issue_tracker": "https://github.com/zxcvbnm3057/rose-esp32/issues",
   "iot_class": "local_polling",
   "requirements": [],
