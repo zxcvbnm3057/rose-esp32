@@ -3,3 +3,6 @@ type: custom:rose-climate-remote-card
 entity: climate.living_room_ac
 # Optional. Remove this line to use the climate entity's friendly name.
 name: TCL空调遥控器
+# Optional and independent. Bind either one or both to any numeric HA sensor entities.
+# temperature_entity: sensor.living_room_temperature
+# humidity_entity: sensor.living_room_humidity

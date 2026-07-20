@@ -24,6 +24,20 @@ const MODE_COLORS = {
   off: "#9e9e9e",
 };
 const TIMER_OPTIONS = [0, 10, 30, 60, 90, 120, 180, 240, 360, 480];
+const OPTIONAL_ENTITY_KEYS = new Set(["temperature_entity", "humidity_entity"]);
+
+function convertTemperature(value, fromUnit, toUnit) {
+  const normalize = (unit) => String(unit || "°C").replace("deg", "°").toUpperCase();
+  const source = normalize(fromUnit);
+  const target = normalize(toUnit);
+  if (source === target) return value;
+  let celsius = value;
+  if (source.includes("F")) celsius = (value - 32) * 5 / 9;
+  else if (source.includes("K")) celsius = value - 273.15;
+  if (target.includes("F")) return celsius * 9 / 5 + 32;
+  if (target.includes("K")) return celsius + 273.15;
+  return celsius;
+}
 
 class RoseClimateRemoteCardEditor extends HTMLElement {
   constructor() {
@@ -43,7 +57,7 @@ class RoseClimateRemoteCardEditor extends HTMLElement {
 
   _updateConfig(key, value) {
     const config = { ...this._config };
-    if (key === "name" && !value.trim()) delete config.name;
+    if ((key === "name" || OPTIONAL_ENTITY_KEYS.has(key)) && !value.trim()) delete config[key];
     else config[key] = value;
     this._config = config;
     this.dispatchEvent(new CustomEvent("config-changed", {
@@ -62,6 +76,8 @@ class RoseClimateRemoteCardEditor extends HTMLElement {
     <div class="editor">
       <ha-entity-picker label="空调实体" allow-custom-entity></ha-entity-picker>
       <ha-textfield label="标题名称" placeholder="留空则使用实体名称"></ha-textfield>
+      <ha-entity-picker class="temperature" label="环境温度实体（可选）" allow-custom-entity></ha-entity-picker>
+      <ha-entity-picker class="humidity" label="环境湿度实体（可选）" allow-custom-entity></ha-entity-picker>
     </div>`;
 
     const entityPicker = this.shadowRoot.querySelector("ha-entity-picker");
@@ -78,6 +94,19 @@ class RoseClimateRemoteCardEditor extends HTMLElement {
     nameField.addEventListener("change", (event) => {
       this._updateConfig("name", event.target.value || "");
     });
+
+    const bindOptionalPicker = (selector, configKey) => {
+      const picker = this.shadowRoot.querySelector(selector);
+      picker.hass = this._hass;
+      picker.value = this._config[configKey] || "";
+      picker.includeDomains = ["sensor"];
+      picker.includeDeviceClasses = [configKey === "temperature_entity" ? "temperature" : "humidity"];
+      picker.addEventListener("value-changed", (event) => {
+        this._updateConfig(configKey, event.detail?.value ?? event.target.value ?? "");
+      });
+    };
+    bindOptionalPicker(".temperature", "temperature_entity");
+    bindOptionalPicker(".humidity", "humidity_entity");
   }
 }
 
@@ -154,6 +183,15 @@ class RoseClimateRemoteCard extends HTMLElement {
     return Boolean(state && !["unavailable", "unknown"].includes(state.state));
   }
 
+  _numericEntity(entityId) {
+    if (!entityId) return null;
+    const state = this._state(entityId);
+    if (!state || ["unavailable", "unknown"].includes(state.state)) return null;
+    const value = Number(state.state);
+    if (!Number.isFinite(value)) return null;
+    return { value, unit: state.attributes?.unit_of_measurement };
+  }
+
   _call(domain, service, data = {}, entityId = this._config.entity) {
     if (!this._hass || !entityId) return;
     this._hass.callService(domain, service, { entity_id: entityId, ...data });
@@ -200,18 +238,30 @@ class RoseClimateRemoteCard extends HTMLElement {
     const attributes = state?.attributes || {};
     const power = state && state.state !== "off" && state.state !== "unavailable";
     const temperature = Math.round(attributes.temperature ?? 26);
-    const currentTemperature = Number(attributes.current_temperature);
-    const hasCurrentTemperature = attributes.current_temperature != null
-      && Number.isFinite(currentTemperature);
-    const humidityValue = attributes.current_humidity ?? attributes.humidity;
-    const currentHumidity = Number(humidityValue);
-    const hasCurrentHumidity = humidityValue != null && Number.isFinite(currentHumidity);
+    const climateTemperatureUnit = attributes.temperature_unit
+      || attributes.unit_of_measurement
+      || this._hass?.config?.unit_system?.temperature
+      || "°C";
+    const boundTemperature = this._numericEntity(this._config.temperature_entity);
+    const climateCurrentTemperature = Number(attributes.current_temperature);
+    const currentTemperature = boundTemperature
+      ? convertTemperature(boundTemperature.value, boundTemperature.unit, climateTemperatureUnit)
+      : climateCurrentTemperature;
+    const hasCurrentTemperature = boundTemperature !== null
+      || (attributes.current_temperature != null && Number.isFinite(climateCurrentTemperature));
+    const boundHumidity = this._numericEntity(this._config.humidity_entity);
+    const climateHumidityValue = attributes.current_humidity ?? attributes.humidity;
+    const climateCurrentHumidity = Number(climateHumidityValue);
+    const currentHumidity = boundHumidity?.value ?? climateCurrentHumidity;
+    const hasCurrentHumidity = boundHumidity !== null
+      || (climateHumidityValue != null && Number.isFinite(climateCurrentHumidity));
+    const humidityUnit = boundHumidity?.unit || "%";
     const environmentReadings = [
       hasCurrentTemperature
-        ? `<span><ha-icon icon="mdi:home-thermometer-outline"></ha-icon> ${Math.round(currentTemperature)} °C</span>`
+        ? `<span><ha-icon icon="mdi:home-thermometer-outline"></ha-icon> ${Math.round(currentTemperature)} ${climateTemperatureUnit}</span>`
         : "",
       hasCurrentHumidity
-        ? `<span><ha-icon icon="mdi:water-percent"></ha-icon> ${Math.round(currentHumidity)}%</span>`
+        ? `<span><ha-icon icon="mdi:water-percent"></ha-icon> ${Math.round(currentHumidity)}${humidityUnit}</span>`
         : "",
     ].filter(Boolean).join("");
     const fan = FANS.find(([value]) => value === attributes.fan_mode)?.[1] || attributes.fan_mode || "--";
