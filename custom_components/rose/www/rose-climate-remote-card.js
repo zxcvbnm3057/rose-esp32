@@ -244,6 +244,7 @@ class RoseClimateRemoteCard extends HTMLElement {
     const econoEnabled = enabled("econo") && power && state?.state === "cool" && !active("turbo");
 
     this.shadowRoot.innerHTML = `<style>
+      *, *::before, *::after { box-sizing:border-box; }
       :host { display:block; container-type:inline-size; --accent:${modeColor}; --ink:var(--primary-text-color,#202124); }
       ha-card { position:relative; overflow:visible; color:var(--ink); font-family:var(--paper-font-body1_-_font-family,"Microsoft YaHei",sans-serif); }
       .remote { width:100%; min-width:0; padding:clamp(12px,3.2cqw,20px) clamp(10px,3cqw,18px) clamp(12px,3cqw,18px); box-sizing:border-box; }
@@ -273,9 +274,9 @@ class RoseClimateRemoteCard extends HTMLElement {
       .mode-button { border:0; background:transparent; color:var(--ink); cursor:pointer; display:grid; place-items:center; }
       .mode-button ha-icon { --mdc-icon-size:clamp(23px,6cqw,28px); }
       .mode-button.active { color:#fff; background:var(--accent); border-radius:18px; }
-      .row { width:100%; height:clamp(52px,14cqw,64px); margin-top:clamp(10px,3cqw,18px); padding:0 clamp(12px,3.5cqw,18px); border:0; border-radius:clamp(12px,4cqw,18px); background:var(--secondary-background-color,#f2f2f2); color:var(--ink); display:flex; align-items:center; gap:clamp(8px,3cqw,14px); font-size:clamp(16px,4cqw,20px); }
+      .row { width:100%; max-width:100%; min-width:0; height:clamp(52px,14cqw,64px); margin-top:clamp(10px,3cqw,18px); padding:0 clamp(12px,3.5cqw,18px); border:0; border-radius:clamp(12px,4cqw,18px); background:var(--secondary-background-color,#f2f2f2); color:var(--ink); display:flex; align-items:center; gap:clamp(8px,3cqw,14px); font-size:clamp(16px,4cqw,20px); overflow:hidden; }
       .row ha-icon { --mdc-icon-size:clamp(23px,6cqw,28px); }
-      .row select { flex:1; min-width:0; height:100%; border:0; outline:0; appearance:auto; background:transparent; color:var(--ink); font:inherit; cursor:pointer; }
+      .row select { flex:1 1 0; width:0; min-width:0; max-width:100%; height:100%; border:0; outline:0; appearance:auto; background:transparent; color:var(--ink); font:inherit; cursor:pointer; text-overflow:ellipsis; }
       .menu { position:absolute; z-index:10; top:clamp(50px,12cqw,58px); right:clamp(6px,2cqw,12px); width:min(310px,calc(100% - 12px)); max-height:min(420px,calc(100vh - 100px)); overflow-y:auto; padding:8px; border-radius:12px; background:var(--ha-card-background,var(--card-background-color,#fff)); box-shadow:0 6px 24px rgba(0,0,0,.24); display:${this._menuOpen ? "grid" : "none"}; }
       .menu-item { height:50px; border:0; border-radius:8px; padding:0 10px; background:transparent; color:var(--ink); display:grid; grid-template-columns:32px 1fr 38px; align-items:center; gap:8px; text-align:left; font-size:16px; cursor:pointer; }
       .menu-item:hover { background:var(--secondary-background-color,#f2f2f2); }

@@ -437,12 +437,25 @@
         }
 
         .row {
+            box-sizing: border-box;
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
             height: clamp(52px, 14cqw, 64px);
             margin-top: clamp(10px, 3cqw, 18px);
             padding-inline: clamp(12px, 3.5cqw, 18px);
             border-radius: clamp(12px, 4cqw, 18px);
             gap: clamp(8px, 3cqw, 14px);
-            font-size: clamp(16px, 4cqw, 20px)
+            font-size: clamp(16px, 4cqw, 20px);
+            overflow: hidden
+        }
+
+        .row select {
+            flex: 1 1 0;
+            width: 0;
+            min-width: 0;
+            max-width: 100%;
+            text-overflow: ellipsis
         }
 
         .menu {
