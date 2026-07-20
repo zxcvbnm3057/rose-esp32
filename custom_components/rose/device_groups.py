@@ -49,3 +49,26 @@ def device_group_specs(entry, ble_states: dict) -> list[dict]:
                     }
                 )
     return specs
+
+
+def prepare_device_registry(device_registry, entry, ble_states: dict) -> None:
+    """Register the platform and all subentry-owned devices."""
+    device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, "platform")},
+        name="Rose Platform",
+        manufacturer="Rose",
+    )
+    for spec in device_group_specs(entry, ble_states):
+        identifiers_connections = {"identifiers": {spec["identifier"]}}
+        if "connection" in spec:
+            identifiers_connections["connections"] = {spec["connection"]}
+        device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            config_subentry_id=spec["subentry_id"],
+            name=spec["name"],
+            manufacturer="Rose",
+            model=spec["model"],
+            via_device=(DOMAIN, "platform"),
+            **identifiers_connections,
+        )

@@ -60,3 +60,38 @@ def test_subentries_create_distinct_device_groups(monkeypatch):
     assert all(spec["identifier"] != ("rose", "platform") for spec in specs)
     assert specs[2]["connection"] == ("bluetooth", "aa:bb:cc:dd:ee:ff")
     assert specs[2]["name"] == "Phone"
+
+
+def test_registry_specs_do_not_require_device_entry_subentry_attribute(monkeypatch):
+    module = load_device_groups(monkeypatch)
+
+    class Ha2026DeviceEntry:
+        def __init__(self, device_id):
+            self.id = device_id
+
+    class Registry:
+        def __init__(self):
+            self.calls = []
+
+        def async_get_or_create(self, **kwargs):
+            self.calls.append(kwargs)
+            return Ha2026DeviceEntry(f"device-{len(self.calls)}")
+
+    registry = Registry()
+    entry = types.SimpleNamespace(
+        entry_id="entry",
+        subentries={
+            "light-sub": types.SimpleNamespace(
+                subentry_type="light",
+                data={"key": "desk", "name": "Desk light"},
+            )
+        },
+    )
+
+    module.prepare_device_registry(registry, entry, {})
+
+    assert len(registry.calls) == 2
+    assert registry.calls[0]["identifiers"] == {("rose", "platform")}
+    assert "config_subentry_id" not in registry.calls[0]
+    assert registry.calls[1]["config_subentry_id"] == "light-sub"
+    assert registry.calls[1]["via_device"] == ("rose", "platform")

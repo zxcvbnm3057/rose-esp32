@@ -25,7 +25,7 @@ from .const import (
     SUBENTRY_TYPE_BLE,
 )
 from .coordinator import RoseCoordinator
-from .device_groups import device_group_specs
+from .device_groups import prepare_device_registry
 
 FRONTEND_URL = "/rose_frontend"
 FRONTEND_MODULE_URL = f"{FRONTEND_URL}/rose-climate-remote-card.js"
@@ -33,33 +33,8 @@ FRONTEND_MODULE_URL = f"{FRONTEND_URL}/rose-climate-remote-card.js"
 
 def _prepare_device_registry(hass: HomeAssistant, entry: ConfigEntry, coordinator) -> None:
     device_registry = dr.async_get(hass)
-    platform_device = device_registry.async_get_or_create(
-        config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, "platform")},
-        name="Rose Platform",
-        manufacturer="Rose",
-    )
-    if platform_device.config_subentry_id is not None:
-        device_registry.async_update_device(
-            platform_device.id,
-            new_config_entry_id=entry.entry_id,
-            new_config_subentry_id=None,
-        )
-
     ble_states = (coordinator.data or {}).get("ble", {})
-    for spec in device_group_specs(entry, ble_states):
-        identifiers_connections = {"identifiers": {spec["identifier"]}}
-        if "connection" in spec:
-            identifiers_connections["connections"] = {spec["connection"]}
-        device_registry.async_get_or_create(
-            config_entry_id=entry.entry_id,
-            config_subentry_id=spec["subentry_id"],
-            name=spec["name"],
-            manufacturer="Rose",
-            model=spec["model"],
-            via_device_id=platform_device.id,
-            **identifiers_connections,
-        )
+    prepare_device_registry(device_registry, entry, ble_states)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -133,8 +108,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 continue
             entity_registry.async_update_entity(
                 entity.entity_id,
-                new_config_entry_id=entry.entry_id,
-                new_config_subentry_id=ble_subentry.subentry_id,
+                config_entry_id=entry.entry_id,
+                config_subentry_id=ble_subentry.subentry_id,
             )
         options = dict(entry.options)
         options.pop(CONF_BLE_DEVICES, None)
