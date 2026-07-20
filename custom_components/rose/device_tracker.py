@@ -2,46 +2,54 @@
 from __future__ import annotations
 
 from homeassistant.components.device_tracker import ScannerEntity, SourceType
+from homeassistant.helpers.entity_registry import EVENT_ENTITY_REGISTRY_UPDATED
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import CONF_BLE_DEVICES, DOMAIN
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
     runtime = hass.data[DOMAIN][entry.entry_id]
     coordinator = runtime["coordinator"]
-    added_macs: set[str] = set()
+    selected_macs = entry.options.get(CONF_BLE_DEVICES, [])
 
-    def add_tracker(mac: str) -> None:
-        if mac in added_macs:
+    async def remove_selected_mac(mac: str) -> None:
+        current = entry.options.get(CONF_BLE_DEVICES, [])
+        if mac not in current:
             return
-        added_macs.add(mac)
-        async_add_entities([RoseBleTracker(coordinator, mac, added_macs.discard)])
+        hass.config_entries.async_update_entry(
+            entry,
+            options={
+                **entry.options,
+                CONF_BLE_DEVICES: [selected for selected in current if selected != mac],
+            },
+        )
 
-    for mac in (coordinator.data or {}).get("ble", {}):
-        add_tracker(mac)
-    entry.async_on_unload(coordinator.async_add_ble_discovered_callback(add_tracker))
-
-    def discover_from_snapshot() -> None:
-        for mac in (coordinator.data or {}).get("ble", {}):
-            add_tracker(mac)
-
-    entry.async_on_unload(coordinator.async_add_listener(discover_from_snapshot))
+    async_add_entities(
+        [RoseBleTracker(coordinator, mac, remove_selected_mac) for mac in selected_macs]
+    )
 
 
 class RoseBleTracker(CoordinatorEntity, ScannerEntity):
     _attr_has_entity_name = True
     _attr_source_type = SourceType.BLUETOOTH_LE
 
-    def __init__(self, coordinator, mac: str, on_remove) -> None:
+    def __init__(self, coordinator, mac: str, remove_selected_mac) -> None:
         super().__init__(coordinator)
         self._mac = mac
-        self._on_remove = on_remove
+        self._remove_selected_mac = remove_selected_mac
         self._attr_unique_id = f"rose_ble_{self._mac.replace(':', '')}"
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        self.async_on_remove(lambda: self._on_remove(self._mac))
+        self.async_on_remove(
+            self.hass.bus.async_listen(EVENT_ENTITY_REGISTRY_UPDATED, self._entity_registry_updated)
+        )
+
+    def _entity_registry_updated(self, event) -> None:
+        if event.data.get("action") != "remove" or event.data.get("entity_id") != self.entity_id:
+            return
+        self.hass.async_create_task(self._remove_selected_mac(self._mac))
 
     @property
     def name(self):

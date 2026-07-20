@@ -12,6 +12,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .client import RoseApiError, RoseClient
 from .const import (
     CLIMATE_PROTOCOL_NAMES,
+    CONF_BLE_DEVICES,
     CONF_KEY,
     CONF_PLATFORM_URL,
     DOMAIN,
@@ -32,6 +33,11 @@ async def _validate_platform(hass, url: str) -> None:
 
 class RoseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        return RoseOptionsFlow()
 
     @classmethod
     @callback
@@ -82,6 +88,54 @@ class RoseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 {vol.Required(CONF_PLATFORM_URL, default=entry.data[CONF_PLATFORM_URL]): str}
             ),
             errors=errors,
+        )
+
+
+class RoseOptionsFlow(config_entries.OptionsFlow):
+    async def async_step_init(self, user_input=None):
+        entry = self.config_entry
+        selected = list(entry.options.get(CONF_BLE_DEVICES, []))
+        errors = {}
+
+        runtime = self.hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+        client = runtime.get("client")
+        try:
+            known_devices = await client.ble_device_names() if client else {}
+        except RoseApiError:
+            known_devices = {}
+            errors["base"] = "cannot_connect"
+
+        available = {
+            mac: f"{name} ({mac})" if name != mac else mac
+            for mac, name in known_devices.items()
+            if mac not in selected
+        }
+
+        if user_input is not None and not errors:
+            added = list(user_input.get(CONF_BLE_DEVICES, []))
+            return self.async_create_entry(
+                title="",
+                data={
+                    **entry.options,
+                    CONF_BLE_DEVICES: [*selected, *[mac for mac in added if mac not in selected]],
+                },
+            )
+
+        selected_labels = [
+            f"{known_devices.get(mac, mac)} ({mac})"
+            for mac in selected
+        ]
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_BLE_DEVICES, default=[]): cv.multi_select(available),
+                }
+            ),
+            errors=errors,
+            description_placeholders={
+                "selected_devices": ", ".join(selected_labels) or "None",
+            },
         )
 
 

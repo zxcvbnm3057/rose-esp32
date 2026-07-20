@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from datetime import timedelta
 import logging
 
@@ -35,18 +34,8 @@ class RoseCoordinator(DataUpdateCoordinator[dict]):
     def __init__(self, hass, client: RoseClient) -> None:
         super().__init__(hass, logger=LOGGER, name="Rose", update_interval=timedelta(seconds=15))
         self.client = client
-        self._ble_discovered_callbacks: list[Callable[[str], None]] = []
         self._ws_task: asyncio.Task | None = None
         self._received_ble_snapshot = False
-
-    def async_add_ble_discovered_callback(self, callback: Callable[[str], None]) -> Callable[[], None]:
-        self._ble_discovered_callbacks.append(callback)
-
-        def remove_callback() -> None:
-            if callback in self._ble_discovered_callbacks:
-                self._ble_discovered_callbacks.remove(callback)
-
-        return remove_callback
 
     async def _async_update_data(self) -> dict:
         try:
@@ -132,7 +121,6 @@ class RoseCoordinator(DataUpdateCoordinator[dict]):
     def _set_ble_state(self, mac: str, home: bool, rssi: int | None, fire_event: bool) -> None:
         data = dict(self.data or {})
         ble = {key: dict(value) for key, value in data.get("ble", {}).items()}
-        is_new = mac not in ble
         previous_home = bool(ble.get(mac, {}).get("home"))
         ble[mac] = {
             "home": home,
@@ -141,9 +129,6 @@ class RoseCoordinator(DataUpdateCoordinator[dict]):
         }
         data["ble"] = ble
         self.async_set_updated_data(data)
-        if is_new:
-            for callback in tuple(self._ble_discovered_callbacks):
-                callback(mac)
         if fire_event and home != previous_home:
             self.hass.bus.async_fire(
                 EVENT_BLE_PRESENCE,

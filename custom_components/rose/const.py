@@ -3,6 +3,7 @@
 DOMAIN = "rose"
 CONF_PLATFORM_URL = "platform_url"
 CONF_KEY = "key"
+CONF_BLE_DEVICES = "ble_devices"
 SUBENTRY_TYPE_CLIMATE = "climate"
 SUBENTRY_TYPE_LIGHT = "light"
 DEFAULT_NAME = "Rose Platform"

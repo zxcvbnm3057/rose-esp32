@@ -108,6 +108,20 @@
             }
         }
     },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Manually sync BLE devices",
+                "description": "Fetch known BLE devices from Rose Platform. Already added devices are read-only here and can only be removed from their entity page.\n\nAlready added: {selected_devices}",
+                "data": {
+                    "ble_devices": "Devices to add"
+                }
+            }
+        },
+        "error": {
+            "cannot_connect": "Unable to fetch BLE devices from Rose Platform."
+        }
+    },
     "services": {
         "send_tcl": {
             "name": "Send full TCL state",

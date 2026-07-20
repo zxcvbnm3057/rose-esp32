@@ -13,9 +13,10 @@ from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceEntry
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 from .client import RoseApiError, RoseClient
-from .const import CONF_PLATFORM_URL, DOMAIN, PLATFORMS
+from .const import CONF_BLE_DEVICES, CONF_PLATFORM_URL, DOMAIN, PLATFORMS
 from .coordinator import RoseCoordinator
 
 FRONTEND_URL = "/rose_frontend"
@@ -44,6 +45,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "hardware": hardware,
         "climate_entities": {},
     }
+    if CONF_BLE_DEVICES not in entry.options:
+        entity_registry = er.async_get(hass)
+        device_registry = dr.async_get(hass)
+        existing_macs = []
+        for entity in er.async_entries_for_config_entry(entity_registry, entry.entry_id):
+            if entity.domain != "device_tracker" or entity.device_id is None:
+                continue
+            device = device_registry.async_get(entity.device_id)
+            if device is None:
+                continue
+            existing_macs.extend(
+                identifier.removeprefix("ble_")
+                for domain, identifier in device.identifiers
+                if domain == DOMAIN and identifier.startswith("ble_")
+            )
+        hass.config_entries.async_update_entry(
+            entry,
+            options={**entry.options, CONF_BLE_DEVICES: sorted(set(existing_macs))},
+        )
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await coordinator.async_start_websocket()
