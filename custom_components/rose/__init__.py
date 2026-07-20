@@ -28,7 +28,11 @@ from .coordinator import RoseCoordinator
 from .device_groups import prepare_device_registry
 
 FRONTEND_URL = "/rose_frontend"
-FRONTEND_MODULE_URL = f"{FRONTEND_URL}/rose-climate-remote-card.js"
+FRONTEND_PATH = Path(__file__).parent / "www"
+FRONTEND_CARD_PATH = FRONTEND_PATH / "rose-climate-remote-card.js"
+FRONTEND_MODULE_URL = (
+    f"{FRONTEND_URL}/{FRONTEND_CARD_PATH.name}?v={FRONTEND_CARD_PATH.stat().st_mtime_ns}"
+)
 
 
 def _prepare_device_registry(hass: HomeAssistant, entry: ConfigEntry, coordinator) -> None:
@@ -39,7 +43,7 @@ def _prepare_device_registry(hass: HomeAssistant, entry: ConfigEntry, coordinato
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     await hass.http.async_register_static_paths(
-        [StaticPathConfig(FRONTEND_URL, str(Path(__file__).parent / "www"), cache_headers=False)]
+        [StaticPathConfig(FRONTEND_URL, str(FRONTEND_PATH), cache_headers=False)]
     )
     add_extra_js_url(hass, FRONTEND_MODULE_URL)
     return True

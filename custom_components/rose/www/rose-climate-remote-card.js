@@ -71,11 +71,14 @@ class RoseClimateRemoteCardEditor extends HTMLElement {
     if (!this.shadowRoot || !this._config || !this._hass) return;
     this.shadowRoot.innerHTML = `<style>
       .editor { display:grid; gap:16px; padding:8px 0; }
-      ha-entity-picker, ha-textfield { width:100%; }
+      ha-entity-picker { width:100%; }
+      .text-field { display:grid; gap:7px; color:var(--primary-text-color,#212121); font-size:14px; }
+      .text-field input { box-sizing:border-box; width:100%; min-height:56px; padding:0 16px; border:1px solid var(--divider-color,#9e9e9e); border-radius:4px; outline:0; background:var(--card-background-color,#fff); color:var(--primary-text-color,#212121); font:inherit; font-size:16px; }
+      .text-field input:focus { border:2px solid var(--primary-color,#03a9f4); padding-inline:15px; }
     </style>
     <div class="editor">
       <ha-entity-picker label="空调实体" allow-custom-entity></ha-entity-picker>
-      <ha-textfield label="标题名称" placeholder="留空则使用实体名称"></ha-textfield>
+      <label class="text-field"><span>标题名称（可选）</span><input class="name" type="text" placeholder="留空则使用实体名称"></label>
       <ha-entity-picker class="temperature" label="环境温度实体（可选）" allow-custom-entity></ha-entity-picker>
       <ha-entity-picker class="humidity" label="环境湿度实体（可选）" allow-custom-entity></ha-entity-picker>
     </div>`;
@@ -89,7 +92,7 @@ class RoseClimateRemoteCardEditor extends HTMLElement {
       if (value) this._updateConfig("entity", value);
     });
 
-    const nameField = this.shadowRoot.querySelector("ha-textfield");
+    const nameField = this.shadowRoot.querySelector("input.name");
     nameField.value = this._config.name || "";
     nameField.addEventListener("change", (event) => {
       this._updateConfig("name", event.target.value || "");
