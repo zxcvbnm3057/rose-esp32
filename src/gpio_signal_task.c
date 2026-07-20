@@ -22,6 +22,32 @@ static SemaphoreHandle_t rmt_resource_mutex = NULL;
 static bool rmt_tx_in_use[2] = {false, false};
 static bool rmt_rx_in_use[2] = {false, false};
 
+typedef struct
+{
+    uint8_t gpio;
+    signal_edge_t *edges;
+    volatile uint16_t edge_count;
+    uint16_t max_edges;
+    volatile int64_t last_edge_time;
+} exchange_capture_t;
+
+static void exchange_capture_isr(void *arg)
+{
+    exchange_capture_t *capture = (exchange_capture_t *)arg;
+    int64_t now = esp_timer_get_time();
+    uint16_t edge_index = capture->edge_count;
+    if (edge_index >= capture->max_edges)
+    {
+        return;
+    }
+
+    int current_level = gpio_get_level(capture->gpio);
+    capture->edges[edge_index].level = current_level ? 0 : 1;
+    capture->edges[edge_index].duration_us = (uint32_t)(now - capture->last_edge_time);
+    capture->last_edge_time = now;
+    capture->edge_count = edge_index + 1;
+}
+
 bool reserve_rmt_tx_channel(int8_t *channel_out)
 {
     if (!rmt_resource_mutex)
@@ -191,7 +217,7 @@ void gpio_signal_tx_task(void *pvParameters)
                 free(item.signal_data);
                 continue;
             }
-            if (item.do_rx)
+            if (item.do_rx && !item.signal_data)
             {
                 if (!reserve_rmt_rx_channel(&item.rx_channel))
                 {
@@ -230,7 +256,7 @@ void gpio_signal_tx_task(void *pvParameters)
                         .carrier_freq_hz = item.carrier_hz,
                         .carrier_duty_percent = (uint8_t)(item.duty_cycle * 100.0f + 0.5f),
                         .carrier_level = RMT_CARRIER_LEVEL_HIGH,
-                        .idle_output_en = true,
+                        .idle_output_en = !item.do_rx,
                         .idle_level = RMT_IDLE_LEVEL_LOW,
                     }};
 
@@ -261,6 +287,41 @@ void gpio_signal_tx_task(void *pvParameters)
                     continue;
                 }
 
+                exchange_capture_t exchange_capture = {
+                    .gpio = item.gpio,
+                    .edges = NULL,
+                    .edge_count = 0,
+                    .max_edges = item.rx_max_edges,
+                    .last_edge_time = 0,
+                };
+                if (item.do_rx)
+                {
+                    exchange_capture.edges = calloc(item.rx_max_edges, sizeof(signal_edge_t));
+                    esp_err_t capture_ret = exchange_capture.edges ? gpio_install_isr_service(0) : ESP_ERR_NO_MEM;
+                    if (capture_ret == ESP_ERR_INVALID_STATE)
+                    {
+                        capture_ret = ESP_OK;
+                    }
+                    if (capture_ret == ESP_OK)
+                    {
+                        gpio_set_intr_type(item.gpio, GPIO_INTR_ANYEDGE);
+                        capture_ret = gpio_isr_handler_add(item.gpio, exchange_capture_isr, &exchange_capture);
+                    }
+                    if (capture_ret != ESP_OK)
+                    {
+                        event_cmd_ack_t err = {item.cmd_id, 1, capture_ret == ESP_ERR_NO_MEM ? IOT_ERR_NO_MEM : IOT_ERR_DRIVER};
+                        send_event(EVENT_ERROR, &err, sizeof(event_cmd_ack_t));
+                        rmt_driver_uninstall(tx_config.channel);
+                        release_rmt_tx_channel(item.tx_channel);
+                        release_rmt_rx_channel(item.rx_channel);
+                        free(exchange_capture.edges);
+                        free(item.signal_data);
+                        continue;
+                    }
+                    gpio_intr_disable(item.gpio);
+                    gpio_set_direction(item.gpio, GPIO_MODE_INPUT_OUTPUT);
+                }
+
                 // Allocate chunk buffer (sized for one max RMT write)
                 rmt_item32_t *chunk_buf = calloc(max_chunk, sizeof(rmt_item32_t));
                 if (!chunk_buf)
@@ -269,9 +330,11 @@ void gpio_signal_tx_task(void *pvParameters)
                     send_event(EVENT_ERROR, &err, sizeof(event_cmd_ack_t));
                     rmt_driver_uninstall(tx_config.channel);
                     release_rmt_tx_channel(item.tx_channel);
-                    if (item.rx_channel >= 0)
+                    if (item.do_rx)
                     {
-                        release_rmt_rx_channel(item.rx_channel);
+                        gpio_isr_handler_remove(item.gpio);
+                        gpio_intr_disable(item.gpio);
+                        free(exchange_capture.edges);
                     }
                     free(item.signal_data);
                     continue;
@@ -332,9 +395,11 @@ void gpio_signal_tx_task(void *pvParameters)
                     event_cmd_ack_t err = {item.cmd_id, 1, IOT_ERR_DRIVER};
                     send_event(EVENT_ERROR, &err, sizeof(event_cmd_ack_t));
                     release_rmt_tx_channel(item.tx_channel);
-                    if (item.rx_channel >= 0)
+                    if (item.do_rx)
                     {
-                        release_rmt_rx_channel(item.rx_channel);
+                        gpio_isr_handler_remove(item.gpio);
+                        gpio_intr_disable(item.gpio);
+                        free(exchange_capture.edges);
                     }
                     free(item.signal_data);
                     continue;
@@ -349,120 +414,32 @@ void gpio_signal_tx_task(void *pvParameters)
                 // RX phase if requested
                 if (item.do_rx)
                 {
-                    // clk_div=80 -> 1 tick = 1us. 固件始终以最细分辨率采集
-                    // (filter_ticks=1, 只滤掉 <1us 的硬件噪声)；分辨率/毛刺合并
-                    // 由 bridge 软件层处理，芯片不承担该逻辑。
-                    uint16_t filter_ticks = 1;
-                    // End RX frame after a quiet period; avoids indefinite/empty capture behavior.
-                    // NOTE: RMT idle_threshold is a 15-bit field (max 32767 ticks @1us).
-                    // Total capture duration is bounded by the software loop (rx_total_us),
-                    // not this value, so just pick a safe gap that exceeds one IR frame's
-                    // internal spacing but stays within the register limit.
-                    uint16_t idle_ticks = 12000;
+                    exchange_capture.edge_count = 0;
+                    exchange_capture.last_edge_time = esp_timer_get_time();
+                    gpio_intr_enable(item.gpio);
+                    gpio_set_direction(item.gpio, GPIO_MODE_INPUT);
 
-                    // Configure RX channel
-                    rmt_config_t rx_config = {
-                        .rmt_mode = RMT_MODE_RX,
-                        .channel = item.rx_channel,
-                        .gpio_num = item.gpio,
-                        .clk_div = 80,
-                        .mem_block_num = 1,
-                        .rx_config = {
-                            .filter_en = true,
-                            .filter_ticks_thresh = filter_ticks,
-                            .idle_threshold = idle_ticks,
-                        }};
-                    esp_err_t rx_ret = rmt_config(&rx_config);
-                    if (rx_ret != ESP_OK)
+                    int64_t rx_end_time = esp_timer_get_time() + item.rx_total_us;
+                    while (esp_timer_get_time() < rx_end_time && exchange_capture.edge_count < item.rx_max_edges)
                     {
-                        event_cmd_ack_t err = {item.cmd_id, 1, (rx_ret == ESP_ERR_NOT_FOUND) ? IOT_ERR_RESOURCE_EXHAUSTED : IOT_ERR_DRIVER};
-                        send_event(EVENT_ERROR, &err, sizeof(event_cmd_ack_t));
-                        rmt_driver_uninstall(tx_config.channel);
-                        release_rmt_tx_channel(item.tx_channel);
-                        release_rmt_rx_channel(item.rx_channel);
-                        free(item.signal_data);
-                        continue;
+                        vTaskDelay(1);
                     }
-                    rx_ret = rmt_driver_install(rx_config.channel, 1000, 0);
-                    if (rx_ret != ESP_OK)
+                    gpio_isr_handler_remove(item.gpio);
+                    gpio_intr_disable(item.gpio);
+
+                    size_t payload_size = 0;
+                    uint8_t *payload = build_signal_capture_payload(
+                        item.cmd_id,
+                        item.gpio,
+                        exchange_capture.edges,
+                        exchange_capture.edge_count,
+                        &payload_size);
+                    if (payload)
                     {
-                        event_cmd_ack_t err = {item.cmd_id, 1, (rx_ret == ESP_ERR_NOT_SUPPORTED) ? IOT_ERR_UNSUPPORTED : IOT_ERR_RESOURCE_EXHAUSTED};
-                        send_event(EVENT_ERROR, &err, sizeof(event_cmd_ack_t));
-                        rmt_driver_uninstall(tx_config.channel);
-                        release_rmt_tx_channel(item.tx_channel);
-                        release_rmt_rx_channel(item.rx_channel);
-                        free(item.signal_data);
-                        continue;
+                        send_event(EVENT_GPIO_SIGNAL_CAPTURED, payload, payload_size);
+                        free(payload);
                     }
-                    rmt_rx_start(rx_config.channel, true);
-
-                    RingbufHandle_t rb = NULL;
-                    rmt_get_ringbuf_handle(rx_config.channel, &rb);
-
-                    uint32_t rx_end_time = esp_timer_get_time() + item.rx_total_us;
-                    int edged = 0;
-                    signal_edge_t *rx_edges = malloc(sizeof(signal_edge_t) * item.rx_max_edges);
-                    if (!rx_edges)
-                    {
-                        event_cmd_ack_t err = {item.cmd_id, 1, IOT_ERR_NO_MEM};
-                        send_event(EVENT_ERROR, &err, sizeof(event_cmd_ack_t));
-                        rmt_rx_stop(rx_config.channel);
-                        rmt_driver_uninstall(rx_config.channel);
-                        release_rmt_rx_channel(item.rx_channel);
-                    }
-                    else
-                    {
-                        while (esp_timer_get_time() < rx_end_time)
-                        {
-                            size_t rx_size = 0;
-                            rmt_item32_t *rx_item = (rmt_item32_t *)xRingbufferReceive(rb, &rx_size, pdMS_TO_TICKS(10));
-                            if (!rx_item)
-                            {
-                                continue;
-                            }
-
-                            int items = rx_size / sizeof(rmt_item32_t);
-                            for (int j = 0; j < items; j++)
-                            {
-                                if (edged >= item.rx_max_edges)
-                                {
-                                    break;
-                                }
-                                if (rx_item[j].duration0 > 0 && edged < item.rx_max_edges)
-                                {
-                                    rx_edges[edged].level = rx_item[j].level0;
-                                    rx_edges[edged].duration_us = rx_item[j].duration0;
-                                    edged++;
-                                }
-                                if (edged >= item.rx_max_edges)
-                                {
-                                    break;
-                                }
-                                if (rx_item[j].duration1 > 0 && edged < item.rx_max_edges)
-                                {
-                                    rx_edges[edged].level = rx_item[j].level1;
-                                    rx_edges[edged].duration_us = rx_item[j].duration1;
-                                    edged++;
-                                }
-                            }
-
-                            vRingbufferReturnItem(rb, (void *)rx_item);
-                        }
-
-                        rmt_rx_stop(rx_config.channel);
-                        rmt_driver_uninstall(rx_config.channel);
-                        release_rmt_rx_channel(item.rx_channel);
-                        item.rx_channel = -1;
-
-                        size_t payload_size = 0;
-                        uint8_t *payload = build_signal_capture_payload(item.cmd_id, item.gpio, rx_edges, (uint16_t)edged, &payload_size);
-                        if (payload)
-                        {
-                            send_event(EVENT_GPIO_SIGNAL_CAPTURED, payload, payload_size);
-                            free(payload);
-                        }
-                        free(rx_edges);
-                    }
+                    free(exchange_capture.edges);
                 }
 
                 // Send completion ACK
@@ -630,7 +607,7 @@ static void signal_capture_isr(void *arg)
         int level = gpio_get_level(gpio_num);
         uint32_t duration_us = (uint32_t)(now - capture_last_time);
 
-        capture_edges[capture_edge_count].level = level;
+        capture_edges[capture_edge_count].level = level ? 0 : 1;
         capture_edges[capture_edge_count].duration_us = duration_us;
         capture_edge_count++;
         capture_last_time = now;

@@ -45,5 +45,4 @@ def test_reject_bad_checksum():
 def test_start_signal_releases_line_before_capture():
     assert rose_dht11.DHT11_START_SIGNAL == [
         {"level": 0, "duration_us": 20_000},
-        {"level": 1, "duration_us": 30},
     ]

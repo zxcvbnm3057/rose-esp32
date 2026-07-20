@@ -5,7 +5,6 @@ from collections.abc import Sequence
 
 DHT11_START_SIGNAL = [
     {"level": 0, "duration_us": 20_000},
-    {"level": 1, "duration_us": 30},
 ]
 
 
