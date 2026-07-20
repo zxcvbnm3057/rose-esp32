@@ -16,6 +16,7 @@ from .const import (
     CONF_KEY,
     CONF_PLATFORM_URL,
     DOMAIN,
+    SUBENTRY_TYPE_BLE,
     SUBENTRY_TYPE_CLIMATE,
     SUBENTRY_TYPE_LIGHT,
 )
@@ -34,15 +35,11 @@ async def _validate_platform(hass, url: str) -> None:
 class RoseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
-    @staticmethod
-    @callback
-    def async_get_options_flow(config_entry):
-        return RoseOptionsFlow()
-
     @classmethod
     @callback
     def async_get_supported_subentry_types(cls, config_entry):
         return {
+            SUBENTRY_TYPE_BLE: RoseBleSubentryFlow,
             SUBENTRY_TYPE_CLIMATE: RoseClimateSubentryFlow,
             SUBENTRY_TYPE_LIGHT: RoseLightSubentryFlow,
         }
@@ -91,13 +88,23 @@ class RoseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 
-class RoseOptionsFlow(config_entries.OptionsFlow):
-    async def async_step_init(self, user_input=None):
-        entry = self.config_entry
-        selected = list(entry.options.get(CONF_BLE_DEVICES, []))
+class RoseBleSubentryFlow(config_entries.ConfigSubentryFlow):
+    def _existing_subentry(self):
+        return next(
+            (
+                subentry
+                for subentry in self._get_entry().subentries.values()
+                if subentry.subentry_type == SUBENTRY_TYPE_BLE
+            ),
+            None,
+        )
+
+    async def _async_step_sync(self, user_input=None, subentry=None):
+        entry = self._get_entry()
+        selected = list((subentry.data if subentry else entry.options).get(CONF_BLE_DEVICES, []))
         errors = {}
 
-        runtime = self.hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+        runtime = self.hass.data.get(DOMAIN, {}).get(self._entry_id, {})
         client = runtime.get("client")
         try:
             known_devices = await client.ble_device_names() if client else {}
@@ -113,20 +120,17 @@ class RoseOptionsFlow(config_entries.OptionsFlow):
 
         if user_input is not None and not errors:
             added = list(user_input.get(CONF_BLE_DEVICES, []))
-            return self.async_create_entry(
-                title="",
-                data={
-                    **entry.options,
-                    CONF_BLE_DEVICES: [*selected, *[mac for mac in added if mac not in selected]],
-                },
-            )
+            data = {CONF_BLE_DEVICES: [*selected, *[mac for mac in added if mac not in selected]]}
+            if subentry is not None:
+                return self.async_update_and_abort(entry, subentry, data=data)
+            return self.async_create_entry(title="BLE devices", data=data, unique_id="ble_devices")
 
         selected_labels = [
             f"{known_devices.get(mac, mac)} ({mac})"
             for mac in selected
         ]
         return self.async_show_form(
-            step_id="init",
+            step_id="user" if subentry is None else "reconfigure",
             data_schema=vol.Schema(
                 {
                     vol.Optional(CONF_BLE_DEVICES, default=[]): cv.multi_select(available),
@@ -137,6 +141,12 @@ class RoseOptionsFlow(config_entries.OptionsFlow):
                 "selected_devices": ", ".join(selected_labels) or "None",
             },
         )
+
+    async def async_step_user(self, user_input=None):
+        return await self._async_step_sync(user_input, self._existing_subentry())
+
+    async def async_step_reconfigure(self, user_input=None):
+        return await self._async_step_sync(user_input, self._get_reconfigure_subentry())
 
 
 class RoseDeviceSubentryFlow(config_entries.ConfigSubentryFlow):

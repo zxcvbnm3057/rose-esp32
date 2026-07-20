@@ -34,11 +34,7 @@ class RoseUartLight(LightEntity, RestoreEntity):
     @property
     def device_info(self):
         return {
-            "identifiers": {(DOMAIN, f"light_{self._key}")},
-            "name": self._attr_name,
-            "manufacturer": "Rose",
-            "model": "UART light controller",
-            "via_device": (DOMAIN, "platform"),
+            "identifiers": {(DOMAIN, "platform")},
         }
 
     async def async_added_to_hass(self) -> None:

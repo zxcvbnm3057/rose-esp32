@@ -5,29 +5,34 @@ from homeassistant.components.device_tracker import ScannerEntity, SourceType
 from homeassistant.helpers.entity_registry import EVENT_ENTITY_REGISTRY_UPDATED
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_BLE_DEVICES, DOMAIN
+from .const import CONF_BLE_DEVICES, DOMAIN, SUBENTRY_TYPE_BLE
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
     runtime = hass.data[DOMAIN][entry.entry_id]
     coordinator = runtime["coordinator"]
-    selected_macs = entry.options.get(CONF_BLE_DEVICES, [])
+    for subentry_id, subentry in entry.subentries.items():
+        if subentry.subentry_type != SUBENTRY_TYPE_BLE:
+            continue
+        selected_macs = subentry.data.get(CONF_BLE_DEVICES, [])
 
-    async def remove_selected_mac(mac: str) -> None:
-        current = entry.options.get(CONF_BLE_DEVICES, [])
-        if mac not in current:
-            return
-        hass.config_entries.async_update_entry(
-            entry,
-            options={
-                **entry.options,
-                CONF_BLE_DEVICES: [selected for selected in current if selected != mac],
-            },
+        async def remove_selected_mac(mac: str, current_subentry=subentry) -> None:
+            current = current_subentry.data.get(CONF_BLE_DEVICES, [])
+            if mac not in current:
+                return
+            hass.config_entries.async_update_subentry(
+                entry,
+                current_subentry,
+                data={
+                    **current_subentry.data,
+                    CONF_BLE_DEVICES: [selected for selected in current if selected != mac],
+                },
+            )
+
+        async_add_entities(
+            [RoseBleTracker(coordinator, mac, remove_selected_mac) for mac in selected_macs],
+            config_subentry_id=subentry_id,
         )
-
-    async_add_entities(
-        [RoseBleTracker(coordinator, mac, remove_selected_mac) for mac in selected_macs]
-    )
 
 
 class RoseBleTracker(CoordinatorEntity, ScannerEntity):
@@ -75,5 +80,7 @@ class RoseBleTracker(CoordinatorEntity, ScannerEntity):
             "identifiers": {(DOMAIN, f"ble_{self._mac}")},
             "connections": {("bluetooth", self._mac)},
             "name": self.name,
+            "manufacturer": "Rose",
+            "model": "BLE presence device",
             "via_device": (DOMAIN, "platform"),
         }

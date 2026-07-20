@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import MappingProxyType
 
 import voluptuous as vol
 
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
@@ -16,7 +17,13 @@ from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 from .client import RoseApiError, RoseClient
-from .const import CONF_BLE_DEVICES, CONF_PLATFORM_URL, DOMAIN, PLATFORMS
+from .const import (
+    CONF_BLE_DEVICES,
+    CONF_PLATFORM_URL,
+    DOMAIN,
+    PLATFORMS,
+    SUBENTRY_TYPE_BLE,
+)
 from .coordinator import RoseCoordinator
 
 FRONTEND_URL = "/rose_frontend"
@@ -45,7 +52,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "hardware": hardware,
         "climate_entities": {},
     }
-    if CONF_BLE_DEVICES not in entry.options:
+    if CONF_BLE_DEVICES not in entry.options and not any(
+        subentry.subentry_type == SUBENTRY_TYPE_BLE
+        for subentry in entry.subentries.values()
+    ):
         entity_registry = er.async_get(hass)
         device_registry = dr.async_get(hass)
         existing_macs = []
@@ -60,12 +70,68 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 for domain, identifier in device.identifiers
                 if domain == DOMAIN and identifier.startswith("ble_")
             )
-        hass.config_entries.async_update_entry(
-            entry,
-            options={**entry.options, CONF_BLE_DEVICES: sorted(set(existing_macs))},
+        if existing_macs:
+            hass.config_entries.async_update_entry(
+                entry,
+                options={**entry.options, CONF_BLE_DEVICES: sorted(set(existing_macs))},
+            )
+    legacy_ble_devices = entry.options.get(CONF_BLE_DEVICES, [])
+    if legacy_ble_devices and not any(
+        subentry.subentry_type == SUBENTRY_TYPE_BLE
+        for subentry in entry.subentries.values()
+    ):
+        ble_subentry = ConfigSubentry(
+            data=MappingProxyType({CONF_BLE_DEVICES: list(legacy_ble_devices)}),
+            subentry_type=SUBENTRY_TYPE_BLE,
+            title="BLE devices",
+            unique_id="ble_devices",
         )
+        hass.config_entries.async_add_subentry(
+            entry,
+            ble_subentry,
+        )
+        entity_registry = er.async_get(hass)
+        device_registry = dr.async_get(hass)
+        selected_unique_ids = {
+            f"rose_ble_{mac.replace(':', '')}"
+            for mac in legacy_ble_devices
+        }
+        for entity in er.async_entries_for_config_entry(entity_registry, entry.entry_id):
+            if entity.unique_id not in selected_unique_ids:
+                continue
+            entity_registry.async_update_entity(
+                entity.entity_id,
+                new_config_entry_id=entry.entry_id,
+                new_config_subentry_id=ble_subentry.subentry_id,
+            )
+        for mac in legacy_ble_devices:
+            device = device_registry.async_get_device({(DOMAIN, f"ble_{mac}")})
+            if device is not None:
+                device_registry.async_update_device(
+                    device.id,
+                    new_config_entry_id=entry.entry_id,
+                    new_config_subentry_id=ble_subentry.subentry_id,
+                )
+        options = dict(entry.options)
+        options.pop(CONF_BLE_DEVICES, None)
+        hass.config_entries.async_update_entry(entry, options=options)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    entity_registry = er.async_get(hass)
+    device_registry = dr.async_get(hass)
+    for device in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
+        legacy_identifiers = {
+            identifier
+            for domain, identifier in device.identifiers
+            if domain == DOMAIN
+            and (identifier.startswith("climate_") or identifier.startswith("light_"))
+        }
+        if legacy_identifiers and not er.async_entries_for_device(
+            entity_registry,
+            device.id,
+            include_disabled_entities=True,
+        ):
+            device_registry.async_remove_device(device.id)
     await coordinator.async_start_websocket()
 
     if not hass.services.has_service(DOMAIN, "send_tcl"):
@@ -132,10 +198,12 @@ async def async_remove_config_entry_device(
         for subentry in entry.subentries.values()
         if (identifier := subentry.unique_id) is not None
     )
-    runtime = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-    coordinator = runtime.get("coordinator")
-    ble_devices = (coordinator.data or {}).get("ble", {}) if coordinator else {}
-    managed_identifiers.update((DOMAIN, f"ble_{mac}") for mac in ble_devices)
+    managed_identifiers.update(
+        (DOMAIN, f"ble_{mac}")
+        for subentry in entry.subentries.values()
+        if subentry.subentry_type == SUBENTRY_TYPE_BLE
+        for mac in subentry.data.get(CONF_BLE_DEVICES, [])
+    )
     return (
         bool(rose_identifiers)
         and device_entry.identifiers.isdisjoint(managed_identifiers)

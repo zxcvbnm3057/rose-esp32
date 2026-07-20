@@ -6,7 +6,6 @@ from homeassistant.components.number import NumberEntity, NumberMode
 from .const import (
     DOMAIN,
     SUBENTRY_TYPE_CLIMATE,
-    climate_protocol_name,
     configured_subentries,
 )
 
@@ -36,8 +35,6 @@ class RoseClimateTimer(NumberEntity):
         self._runtime = runtime
         self._key = key
         self._attr_unique_id = f"rose_climate_{key}_timer"
-        self._device_name = config.get("name", key.replace("_", " ").title())
-        self._model = climate_protocol_name(config)
         protocol = config.get("protocol", "tcl")
         self._supported = "timer" in CLIMATE_CAPABILITIES.get(protocol, set())
 
@@ -57,11 +54,7 @@ class RoseClimateTimer(NumberEntity):
     @property
     def device_info(self):
         return {
-            "identifiers": {(DOMAIN, f"climate_{self._key}")},
-            "name": self._device_name,
-            "manufacturer": "Rose",
-            "model": self._model,
-            "via_device": (DOMAIN, "platform"),
+            "identifiers": {(DOMAIN, "platform")},
         }
 
     async def async_added_to_hass(self) -> None:

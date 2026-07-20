@@ -32,20 +32,6 @@
                 "reconfigure": "Edit air conditioner"
             },
             "step": {
-                "options": {
-                    "step": {
-                        "init": {
-                            "title": "Manually sync BLE devices",
-                            "description": "Fetch known BLE devices from Rose Platform. Already added devices are read-only here and can only be removed from their entity page.\n\nAlready added: {selected_devices}",
-                            "data": {
-                                "ble_devices": "Devices to add"
-                            }
-                        }
-                    },
-                    "error": {
-                        "cannot_connect": "Unable to fetch BLE devices from Rose Platform."
-                    }
-                },
                 "user": {
                     "title": "Add air conditioner",
                     "data": {
@@ -119,6 +105,37 @@
             },
             "abort": {
                 "reconfigure_successful": "UART light updated successfully."
+            }
+        },
+        "ble": {
+            "title": "BLE devices",
+            "entry_type": "BLE devices",
+            "initiate_flow": {
+                "user": "Manually sync BLE devices",
+                "reconfigure": "Manually sync BLE devices"
+            },
+            "step": {
+                "user": {
+                    "title": "Manually sync BLE devices",
+                    "description": "Fetch known BLE devices from Rose Platform. Already added devices are read-only here and can only be removed from their entity page.\n\nAlready added: {selected_devices}",
+                    "data": {
+                        "ble_devices": "Devices to add"
+                    }
+                },
+                "reconfigure": {
+                    "title": "Manually sync BLE devices",
+                    "description": "Fetch known BLE devices from Rose Platform. Already added devices are read-only here and can only be removed from their entity page.\n\nAlready added: {selected_devices}",
+                    "data": {
+                        "ble_devices": "Devices to add"
+                    }
+                }
+            },
+            "error": {
+                "cannot_connect": "Unable to fetch BLE devices from Rose Platform."
+            },
+            "abort": {
+                "already_configured": "BLE device synchronization is already configured.",
+                "reconfigure_successful": "BLE devices synchronized successfully."
             }
         }
     }

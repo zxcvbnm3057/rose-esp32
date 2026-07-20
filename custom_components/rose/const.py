@@ -6,6 +6,7 @@ CONF_KEY = "key"
 CONF_BLE_DEVICES = "ble_devices"
 SUBENTRY_TYPE_CLIMATE = "climate"
 SUBENTRY_TYPE_LIGHT = "light"
+SUBENTRY_TYPE_BLE = "ble"
 DEFAULT_NAME = "Rose Platform"
 EVENT_BLE_PRESENCE = "rose_ble_presence"
 PLATFORMS = ["binary_sensor", "climate", "device_tracker", "light", "number", "switch"]

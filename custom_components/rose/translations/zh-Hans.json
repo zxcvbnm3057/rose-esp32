@@ -106,20 +106,37 @@
             "abort": {
                 "reconfigure_successful": "UART 灯配置已更新。"
             }
-        }
-    },
-    "options": {
-        "step": {
-            "init": {
-                "title": "手动同步 BLE 设备",
-                "description": "从 Rose Platform 拉取已知 BLE 设备。已添加设备在此处为只读，只能从对应实体页面移除。\n\n已添加：{selected_devices}",
-                "data": {
-                    "ble_devices": "选择要添加的设备"
-                }
-            }
         },
-        "error": {
-            "cannot_connect": "无法从 Rose Platform 拉取 BLE 设备。"
+        "ble": {
+            "title": "BLE 设备",
+            "entry_type": "BLE 设备",
+            "initiate_flow": {
+                "user": "手动同步 BLE 设备",
+                "reconfigure": "手动同步 BLE 设备"
+            },
+            "step": {
+                "user": {
+                    "title": "手动同步 BLE 设备",
+                    "description": "从 Rose Platform 拉取已知 BLE 设备。已添加设备在此处为只读，只能从对应实体页面移除。\n\n已添加：{selected_devices}",
+                    "data": {
+                        "ble_devices": "选择要添加的设备"
+                    }
+                },
+                "reconfigure": {
+                    "title": "手动同步 BLE 设备",
+                    "description": "从 Rose Platform 拉取已知 BLE 设备。已添加设备在此处为只读，只能从对应实体页面移除。\n\n已添加：{selected_devices}",
+                    "data": {
+                        "ble_devices": "选择要添加的设备"
+                    }
+                }
+            },
+            "error": {
+                "cannot_connect": "无法从 Rose Platform 拉取 BLE 设备。"
+            },
+            "abort": {
+                "already_configured": "BLE 设备同步已经配置。",
+                "reconfigure_successful": "BLE 设备同步成功。"
+            }
         }
     }
 }

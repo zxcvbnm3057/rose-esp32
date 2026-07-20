@@ -48,6 +48,7 @@ def load_device_tracker_module(monkeypatch):
     const = types.ModuleType("custom_components.rose.const")
     const.DOMAIN = "rose"
     const.CONF_BLE_DEVICES = "ble_devices"
+    const.SUBENTRY_TYPE_BLE = "ble"
 
     modules = {
         "homeassistant": homeassistant,
@@ -104,23 +105,34 @@ def test_setup_creates_only_manually_selected_trackers(monkeypatch):
     )
     entry = types.SimpleNamespace(
         entry_id="entry",
-        options={"ble_devices": ["aa:bb:cc:dd:ee:ff"]},
+        subentries={
+            "ble-sync": types.SimpleNamespace(
+                subentry_type="ble",
+                data={"ble_devices": ["aa:bb:cc:dd:ee:ff"]},
+            )
+        },
     )
     hass = types.SimpleNamespace(
         data={"rose": {"entry": {"coordinator": coordinator}}},
-        config_entries=types.SimpleNamespace(async_update_entry=lambda *args, **kwargs: None),
+        config_entries=types.SimpleNamespace(async_update_subentry=lambda *args, **kwargs: None),
     )
     added_entities = []
+    added_subentry_ids = []
+
+    def add_entities(entities, config_subentry_id=None):
+        added_entities.extend(entities)
+        added_subentry_ids.append(config_subentry_id)
 
     asyncio.run(
         module.async_setup_entry(
             hass,
             entry,
-            lambda entities: added_entities.extend(entities),
+            add_entities,
         )
     )
 
     assert [entity._mac for entity in added_entities] == ["aa:bb:cc:dd:ee:ff"]
+    assert added_subentry_ids == ["ble-sync"]
 
 
 async def remove_mac(removed_macs, mac):
