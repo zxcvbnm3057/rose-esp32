@@ -12,6 +12,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from .const import (
     DOMAIN,
     SUBENTRY_TYPE_CLIMATE,
+    climate_protocol_name,
     configured_subentries,
 )
 from .protocols.tcl import TclFanMode, TclHvacMode, TclPowerState, TclState, encode_tcl_ir_signal
@@ -79,7 +80,11 @@ class RoseTclClimate(ClimateEntity, RestoreEntity):
     @property
     def device_info(self):
         return {
-            "identifiers": {(DOMAIN, "platform")},
+            "identifiers": {(DOMAIN, f"climate_{self.config_key}")},
+            "name": self._attr_name,
+            "manufacturer": "Rose",
+            "model": climate_protocol_name(self._config),
+            "via_device": (DOMAIN, "platform"),
         }
 
     @property
@@ -133,6 +138,12 @@ class RoseTclClimate(ClimateEntity, RestoreEntity):
 
     async def _send(self) -> None:
         active_mode = self._last_active_mode if self._attr_hvac_mode == HVACMode.OFF else self._attr_hvac_mode
+        if self._attr_hvac_mode != HVACMode.HEAT:
+            self._extra["aux_heat"] = False
+        if self._attr_hvac_mode != HVACMode.COOL:
+            self._extra["econo"] = False
+        if self._attr_hvac_mode not in (HVACMode.COOL, HVACMode.HEAT):
+            self._extra["turbo"] = False
         state = TclState(
             power=TclPowerState.OFF if self._attr_hvac_mode == HVACMode.OFF else TclPowerState.ON,
             mode=HVAC_TO_TCL[active_mode],
@@ -178,5 +189,9 @@ class RoseTclClimate(ClimateEntity, RestoreEntity):
         await self.async_set_hvac_mode(HVACMode.OFF)
 
     async def async_send_extended(self, **values):
+        if values.get("turbo") is True:
+            values["econo"] = False
+        elif values.get("econo") is True:
+            values["turbo"] = False
         self._extra.update({key: value for key, value in values.items() if value is not None})
         await self._send()

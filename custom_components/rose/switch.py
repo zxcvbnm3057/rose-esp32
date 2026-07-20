@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 from homeassistant.components.switch import SwitchEntity
+from homeassistant.components.climate.const import HVACMode
 
 from .const import (
     DOMAIN,
     SUBENTRY_TYPE_CLIMATE,
+    climate_protocol_name,
     configured_subentries,
 )
 
@@ -20,6 +22,12 @@ SWITCHES = {
     "light": "light",
     "aux_heat": "aux_heat",
     "sleep": "sleep",
+}
+
+OPTION_MODES = {
+    "econo": {HVACMode.COOL},
+    "turbo": {HVACMode.COOL, HVACMode.HEAT},
+    "aux_heat": {HVACMode.HEAT},
 }
 
 
@@ -45,6 +53,8 @@ class RoseClimateSwitch(SwitchEntity):
         self._option = option
         self._attr_translation_key = translation_key
         self._attr_unique_id = f"rose_climate_{key}_{option}"
+        self._device_name = config.get("name", key.replace("_", " ").title())
+        self._model = climate_protocol_name(config)
         protocol = config.get("protocol", "tcl")
         self._supported = option in CLIMATE_CAPABILITIES.get(protocol, set())
 
@@ -59,12 +69,19 @@ class RoseClimateSwitch(SwitchEntity):
 
     @property
     def available(self):
-        return self._supported and self._climate is not None
+        if not self._supported or self._climate is None:
+            return False
+        allowed_modes = OPTION_MODES.get(self._option)
+        return allowed_modes is None or self._climate.hvac_mode in allowed_modes
 
     @property
     def device_info(self):
         return {
-            "identifiers": {(DOMAIN, "platform")},
+            "identifiers": {(DOMAIN, f"climate_{self._key}")},
+            "name": self._device_name,
+            "manufacturer": "Rose",
+            "model": self._model,
+            "via_device": (DOMAIN, "platform"),
         }
 
     async def async_added_to_hass(self) -> None:

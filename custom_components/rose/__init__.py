@@ -25,9 +25,41 @@ from .const import (
     SUBENTRY_TYPE_BLE,
 )
 from .coordinator import RoseCoordinator
+from .device_groups import device_group_specs
 
 FRONTEND_URL = "/rose_frontend"
 FRONTEND_MODULE_URL = f"{FRONTEND_URL}/rose-climate-remote-card.js"
+
+
+def _prepare_device_registry(hass: HomeAssistant, entry: ConfigEntry, coordinator) -> None:
+    device_registry = dr.async_get(hass)
+    platform_device = device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, "platform")},
+        name="Rose Platform",
+        manufacturer="Rose",
+    )
+    if platform_device.config_subentry_id is not None:
+        device_registry.async_update_device(
+            platform_device.id,
+            new_config_entry_id=entry.entry_id,
+            new_config_subentry_id=None,
+        )
+
+    ble_states = (coordinator.data or {}).get("ble", {})
+    for spec in device_group_specs(entry, ble_states):
+        identifiers_connections = {"identifiers": {spec["identifier"]}}
+        if "connection" in spec:
+            identifiers_connections["connections"] = {spec["connection"]}
+        device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            config_subentry_id=spec["subentry_id"],
+            name=spec["name"],
+            manufacturer="Rose",
+            model=spec["model"],
+            via_device_id=platform_device.id,
+            **identifiers_connections,
+        )
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -104,34 +136,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 new_config_entry_id=entry.entry_id,
                 new_config_subentry_id=ble_subentry.subentry_id,
             )
-        for mac in legacy_ble_devices:
-            device = device_registry.async_get_device({(DOMAIN, f"ble_{mac}")})
-            if device is not None:
-                device_registry.async_update_device(
-                    device.id,
-                    new_config_entry_id=entry.entry_id,
-                    new_config_subentry_id=ble_subentry.subentry_id,
-                )
         options = dict(entry.options)
         options.pop(CONF_BLE_DEVICES, None)
         hass.config_entries.async_update_entry(entry, options=options)
+    _prepare_device_registry(hass, entry, coordinator)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    entity_registry = er.async_get(hass)
-    device_registry = dr.async_get(hass)
-    for device in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
-        legacy_identifiers = {
-            identifier
-            for domain, identifier in device.identifiers
-            if domain == DOMAIN
-            and (identifier.startswith("climate_") or identifier.startswith("light_"))
-        }
-        if legacy_identifiers and not er.async_entries_for_device(
-            entity_registry,
-            device.id,
-            include_disabled_entities=True,
-        ):
-            device_registry.async_remove_device(device.id)
     await coordinator.async_start_websocket()
 
     if not hass.services.has_service(DOMAIN, "send_tcl"):

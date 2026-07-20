@@ -1,4 +1,5 @@
-# Rose loads the remote card automatically. Replace the climate entity ID only.
+# Rose loads the card automatically. Both fields are editable in the visual card editor.
 type: custom:rose-climate-remote-card
 entity: climate.living_room_ac
+# Optional. Remove this line to use the climate entity's friendly name.
 name: TCL空调遥控器
