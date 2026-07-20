@@ -137,6 +137,48 @@
                 "already_configured": "BLE 设备同步已经配置。",
                 "reconfigure_successful": "BLE 设备同步成功。"
             }
+        },
+        "sensor": {
+            "title": "温湿度传感器",
+            "entry_type": "温湿度传感器",
+            "initiate_flow": {
+                "user": "添加温湿度传感器",
+                "reconfigure": "编辑温湿度传感器"
+            },
+            "step": {
+                "user": {
+                    "title": "添加温湿度传感器",
+                    "data": {
+                        "name": "显示名称",
+                        "model": "传感器型号",
+                        "gpio": "GPIO 端口"
+                    }
+                },
+                "reconfigure": {
+                    "title": "编辑温湿度传感器",
+                    "data": {
+                        "name": "显示名称",
+                        "model": "传感器型号",
+                        "gpio": "GPIO 端口"
+                    }
+                }
+            },
+            "error": {
+                "key_already_in_use": "该型号和 GPIO 端口的传感器已经配置。"
+            },
+            "abort": {
+                "reconfigure_successful": "温湿度传感器配置已更新。"
+            }
+        }
+    },
+    "entity": {
+        "sensor": {
+            "temperature": {
+                "name": "温度"
+            },
+            "humidity": {
+                "name": "湿度"
+            }
         }
     }
 }

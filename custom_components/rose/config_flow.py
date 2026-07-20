@@ -19,6 +19,7 @@ from .const import (
     SUBENTRY_TYPE_BLE,
     SUBENTRY_TYPE_CLIMATE,
     SUBENTRY_TYPE_LIGHT,
+    SUBENTRY_TYPE_SENSOR,
 )
 
 CLIMATE_PROTOCOL_CHOICES = {
@@ -42,6 +43,7 @@ class RoseConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             SUBENTRY_TYPE_BLE: RoseBleSubentryFlow,
             SUBENTRY_TYPE_CLIMATE: RoseClimateSubentryFlow,
             SUBENTRY_TYPE_LIGHT: RoseLightSubentryFlow,
+            SUBENTRY_TYPE_SENSOR: RoseSensorSubentryFlow,
         }
 
     async def async_step_user(self, user_input=None):
@@ -336,5 +338,54 @@ class RoseLightSubentryFlow(RoseDeviceSubentryFlow):
             step_id="reconfigure",
             data_schema=self._light_schema(current, include_key=False),
             errors=errors,
+        )
+
+
+class RoseSensorSubentryFlow(RoseDeviceSubentryFlow):
+    def _schema(self, current: dict) -> vol.Schema:
+        current_gpio = current.get("gpio", 18)
+        return vol.Schema(
+            {
+                vol.Required(CONF_NAME, default=current.get(CONF_NAME, "DHT11")): cv.string,
+                vol.Required("model", default=current.get("model", "dht11")): vol.In(
+                    {"dht11": "DHT11"}
+                ),
+                vol.Required("gpio", default=current_gpio): vol.In(
+                    self._signal_gpio_choices(current_gpio)
+                ),
+            }
+        )
+
+    async def async_step_user(self, user_input=None):
+        errors = {}
+        if user_input is not None:
+            key = f"{user_input['model']}_gpio{user_input['gpio']}"
+            if error := self._key_error(key):
+                errors["base"] = error
+            else:
+                data = {CONF_KEY: key, **user_input}
+                return self.async_create_entry(
+                    title=data[CONF_NAME],
+                    data=data,
+                    unique_id=f"sensor_{key}",
+                )
+        return self.async_show_form(
+            step_id="user",
+            data_schema=self._schema({}),
+            errors=errors,
+        )
+
+    async def async_step_reconfigure(self, user_input=None):
+        subentry = self._get_reconfigure_subentry()
+        current = dict(subentry.data)
+        if user_input is not None:
+            key = f"{user_input['model']}_gpio{user_input['gpio']}"
+            data = {CONF_KEY: key, **user_input}
+            return self.async_update_and_abort(
+                self._get_entry(), subentry, title=data[CONF_NAME], data=data
+            )
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=self._schema(current),
         )
 

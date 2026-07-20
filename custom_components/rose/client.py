@@ -97,6 +97,27 @@ class RoseClient:
             },
         )
 
+    async def signal_exchange(
+        self,
+        gpio: int,
+        signal: list[dict[str, int]],
+        rx_total_us: int,
+        rx_max_edges: int,
+    ) -> list[dict[str, int]]:
+        data = await self._request(
+            "POST",
+            f"/api/v1/gpio/{gpio}/signal/exchange",
+            json={
+                "tx_signal": signal,
+                "carrier_hz": 0,
+                "duty_cycle": 0.5,
+                "rx_total_us": rx_total_us,
+                "rx_max_edges": rx_max_edges,
+                "resolution": "exact",
+            },
+        )
+        return [edge for edge in data.get("edges", []) if isinstance(edge, dict)]
+
     async def uart_send(self, uart_id: int, hex_command: str) -> dict[str, Any]:
         encoded = base64.b64encode(bytes.fromhex(hex_command)).decode("ascii")
         return await self._request(

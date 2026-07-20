@@ -137,6 +137,48 @@
                 "already_configured": "BLE device synchronization is already configured.",
                 "reconfigure_successful": "BLE devices synchronized successfully."
             }
+        },
+        "sensor": {
+            "title": "Temperature and humidity sensor",
+            "entry_type": "Temperature and humidity sensor",
+            "initiate_flow": {
+                "user": "Add temperature and humidity sensor",
+                "reconfigure": "Edit temperature and humidity sensor"
+            },
+            "step": {
+                "user": {
+                    "title": "Add temperature and humidity sensor",
+                    "data": {
+                        "name": "Display name",
+                        "model": "Sensor model",
+                        "gpio": "GPIO port"
+                    }
+                },
+                "reconfigure": {
+                    "title": "Edit temperature and humidity sensor",
+                    "data": {
+                        "name": "Display name",
+                        "model": "Sensor model",
+                        "gpio": "GPIO port"
+                    }
+                }
+            },
+            "error": {
+                "key_already_in_use": "This sensor model and GPIO port are already configured."
+            },
+            "abort": {
+                "reconfigure_successful": "Temperature and humidity sensor updated successfully."
+            }
+        }
+    },
+    "entity": {
+        "sensor": {
+            "temperature": {
+                "name": "Temperature"
+            },
+            "humidity": {
+                "name": "Humidity"
+            }
         }
     }
 }

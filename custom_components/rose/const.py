@@ -7,9 +7,10 @@ CONF_BLE_DEVICES = "ble_devices"
 SUBENTRY_TYPE_CLIMATE = "climate"
 SUBENTRY_TYPE_LIGHT = "light"
 SUBENTRY_TYPE_BLE = "ble"
+SUBENTRY_TYPE_SENSOR = "sensor"
 DEFAULT_NAME = "Rose Platform"
 EVENT_BLE_PRESENCE = "rose_ble_presence"
-PLATFORMS = ["binary_sensor", "climate", "device_tracker", "light", "number", "switch"]
+PLATFORMS = ["binary_sensor", "climate", "device_tracker", "light", "number", "sensor", "switch"]
 
 CLIMATE_PROTOCOL_NAMES = {
 	"tcl": "TCL TAC09CHSD 112-bit infrared",
